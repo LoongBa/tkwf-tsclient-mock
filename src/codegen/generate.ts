@@ -67,6 +67,9 @@ export function generate(source: string, inputPath: string, outputPath: string):
   }));
   lines.push(tpl.dtoTypeSchemas(dtoBlocks));
 
+  // 工厂 DSL 骨架（v1.9.0）
+  lines.push(tpl.factorySkeleton(dtoBlocks));
+
   // 运行时校验骨架（v1.4.0）
   const schemaNames = Object.keys(dtoSchemas);
   lines.push(tpl.validateZodHelpers(schemaNames));

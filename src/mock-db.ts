@@ -109,7 +109,7 @@ export interface MockDb {
   update<T>(table: string, id: string | number, patch: Partial<T>): T | undefined;
   remove(table: string, id: string | number): boolean;
   /** 批量种子数据导入 */
-  buildDataset(dataset: DatasetSeed): void;
+  buildDataset(dataset: DatasetSeed, options?: { strict?: boolean }): void;
   /** 重置数据：无参时重置当前数据集到初始快照；传 name 时切换到该数据集并重置 */
   reset(name?: string): void;
   /** 切换当前数据集到指定名称，不存在则抛出错误 */
@@ -585,6 +585,38 @@ export function createMockDb(
     }
   }
 
+  /** 遍历 relationRegistry 校验外键引用完整性（v1.9.0） */
+  function validateDatasetFK(): void {
+    const violations: string[] = [];
+    for (const [table, fieldMap] of relationRegistry) {
+      const tableMap = tables.get(table);
+      if (!tableMap) continue;
+      for (const [, rel] of fieldMap) {
+        const targetTable = tables.get(rel.targetTable);
+        for (const [id, row] of tableMap) {
+          if (rel.type === "belongsTo") {
+            const fk = row[rel.foreignKey] as string | number | undefined;
+            if (fk !== undefined && fk !== null && (!targetTable || !targetTable.has(fk))) {
+              violations.push(`${table}[${id}].${rel.foreignKey}=${fk} → ${rel.targetTable}[${fk}] not found`);
+            }
+          } else if (rel.type === "hasMany") {
+            const fkArray = row[rel.foreignKey] as (string | number)[] | undefined;
+            if (fkArray) {
+              for (const fk of fkArray) {
+                if (!targetTable || !targetTable.has(fk)) {
+                  violations.push(`${table}[${id}].${rel.foreignKey} contains ${fk} → ${rel.targetTable}[${fk}] not found`);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    if (violations.length > 0) {
+      throw new Error(`MockDb: buildDataset FK violations:\n- ${violations.join("\n- ")}`);
+    }
+  }
+
   function runQuery<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
     const rows = tables.get(table);
     if (!rows) return [];
@@ -761,7 +793,7 @@ export function createMockDb(
       return rows.delete(id);
     },
 
-    buildDataset(dataset: DatasetSeed): void {
+    buildDataset(dataset: DatasetSeed, options?: { strict?: boolean }): void {
       for (const [table, rows] of Object.entries(dataset)) {
         const tableMap = tables.get(table) ?? new Map();
         for (const row of rows) {
@@ -769,6 +801,11 @@ export function createMockDb(
           tableMap.set(id, { ...row });
         }
         tables.set(table, tableMap);
+      }
+
+      // FK 校验（v1.9.0）：strict 模式下校验外键引用完整性
+      if (options?.strict) {
+        validateDatasetFK();
       }
     },
 

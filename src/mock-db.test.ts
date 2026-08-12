@@ -272,6 +272,45 @@ describe("createMockDb — 状态同步 / reset / 注册", () => {
     expect(db.query<PaymentLog>("logs")).toHaveLength(2);
     expect(db.query<PaymentLog>("logs", { id: { eq: 10 } })).toHaveLength(1);
   });
+
+  it("buildDataset strict 模式校验 FK 引用完整性（合法数据通过）", () => {
+    const db = createMockDb({ logs: [], merchants: [] });
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo", targetTable: "merchants", foreignKey: "merchantId",
+    });
+    db.buildDataset({
+      logs: [{ id: 1, status: "OK", merchantId: 10 }],
+      merchants: [{ id: 10, name: "M" }],
+    }, { strict: true });
+    // 合法数据 → 不抛错
+    expect(db.query("logs")).toHaveLength(1);
+  });
+
+  it("buildDataset strict 模式缺少目标行抛错", () => {
+    const db = createMockDb({ logs: [], merchants: [] });
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo", targetTable: "merchants", foreignKey: "merchantId",
+    });
+    expect(() => {
+      db.buildDataset({
+        logs: [{ id: 1, status: "OK", merchantId: 99 }],  // merchants 中没有 id=99
+        merchants: [{ id: 10, name: "M" }],
+      }, { strict: true });
+    }).toThrow(/FK violation/);
+  });
+
+  it("buildDataset 无 strict 时不抛错（向后兼容）", () => {
+    const db = createMockDb({ logs: [], merchants: [] });
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo", targetTable: "merchants", foreignKey: "merchantId",
+    });
+    // 不传 strict → 默认 false，不校验
+    db.buildDataset({
+      logs: [{ id: 1, status: "OK", merchantId: 99 }],
+      merchants: [],
+    });
+    expect(db.query("logs")).toHaveLength(1);
+  });
 });
 
 describe("createMockDb — OperationFilterInput 家族兼容", () => {

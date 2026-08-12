@@ -24,7 +24,7 @@ export function imports(importPath: string, typeNames: string[]): string {
   const typeImports = typeNames.filter(Boolean);
   const lines: string[] = [
     'import type { MockHandler, ScenarioConfig, MockDb } from "@tkwf/tsclient-mock";',
-    'import { createMockDb, defineMock } from "@tkwf/tsclient-mock";',
+    'import { createMockDb, defineMock, createMockFactory } from "@tkwf/tsclient-mock";',
   ];
   if (typeImports.length > 0) {
     lines.push(`import type { ${typeImports.join(", ")} } from "${importPath}";`);
@@ -206,6 +206,25 @@ export function validateZodHelpers(schemaNames: string[]): string {
     "",
     "// ── 运行时校验辅助（v1.4.0，动态 import，不调用不加载 zod） ──",
     funcs,
+    "",
+  ].join("\n");
+}
+
+/**
+ * 生成工厂 DSL 骨架（v1.9.0）。
+ * 每个 DTO 生成 `export const defineXxxFactory = createMockFactory<Xxx>({ _types: XxxSchema })`。
+ * 消费端可用 `defineXxxFactory.make({ key: value })` 覆盖关键字段。
+ * @param dtoBlocks DTO schema 常量名列表
+ */
+export function factorySkeleton(dtoBlocks: Array<{ name: string; schema: string }>): string {
+  if (dtoBlocks.length === 0) return "";
+  const lines = dtoBlocks.map(
+    (d) => `export const define${d.name} = createMockFactory<${d.name}>({ _types: ${d.name}Schema });`,
+  );
+  return [
+    "",
+    "// ── 工厂 DSL（v1.9.0，Agent 可用 defineXxxFactory.make({ key: value }) 覆盖关键字段） ──",
+    ...lines,
     "",
   ].join("\n");
 }
