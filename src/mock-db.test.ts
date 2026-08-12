@@ -364,6 +364,82 @@ describe("createMockDb — OperationFilterInput 家族兼容", () => {
   });
 });
 
+describe("createMockDb — v1.5.0 新增操作符", () => {
+  it("isNull: true 匹配 null 字段", () => {
+    const db = makeDb();
+    // 插入一条 status 为 null 的行
+    db.insert<Record<string, unknown>>("logs", { status: null, amount: 0, createdAt: new Date() } as Record<string, unknown>);
+    const result = db.query<PaymentLog>("logs", { status: { isNull: true } });
+    expect(result).toHaveLength(1);
+  });
+
+  it("isNull: false 匹配非 null 字段", () => {
+    const db = makeDb();
+    db.insert<Record<string, unknown>>("logs", { status: null, amount: 0, createdAt: new Date() } as Record<string, unknown>);
+    const result = db.query<PaymentLog>("logs", { status: { isNull: false } });
+    expect(result).toHaveLength(5); // 5 条原有数据有 status 值
+  });
+
+  it("null 字段 + 其他操作符 → 不匹配", () => {
+    const db = makeDb();
+    db.insert<Record<string, unknown>>("logs", { status: null, amount: 0, createdAt: new Date() } as Record<string, unknown>);
+    const result = db.query<PaymentLog>("logs", { status: { eq: "PENDING" } });
+    expect(result).toHaveLength(0); // null 不匹配 eq
+  });
+
+  it("between [low, high] 闭区间，含边界", () => {
+    const db = makeDb();
+    const result = db.query<PaymentLog>("logs", { amount: { between: [100, 300] } });
+    expect(result).toHaveLength(3); // 100, 200, 300
+  });
+
+  it("between 超出范围不匹配", () => {
+    const db = makeDb();
+    const result = db.query<PaymentLog>("logs", { amount: { between: [400, 500] } });
+    expect(result).toHaveLength(0);
+  });
+
+  it("mode: insensitive + contains 不区分大小写", () => {
+    const db = makeDb();
+    const result = db.query<PaymentLog>("logs", { status: { contains: "success", mode: "insensitive" } });
+    expect(result).toHaveLength(3); // SUCCESS, SUCCESS, SUCCESS
+  });
+
+  it("mode: default（默认）区分大小写", () => {
+    const db = makeDb();
+    const result = db.query<PaymentLog>("logs", { status: { contains: "success", mode: "default" } });
+    expect(result).toHaveLength(0); // 实际值是大写 SUCCESS
+  });
+
+  it("mode: insensitive + startsWith/endsWith", () => {
+    const db = makeDb();
+    const sw = db.query<PaymentLog>("logs", { status: { startsWith: "suc", mode: "insensitive" } });
+    expect(sw).toHaveLength(3);
+    const ew = db.query<PaymentLog>("logs", { status: { endsWith: "ss", mode: "insensitive" } });
+    expect(ew).toHaveLength(3);
+  });
+
+  it("containsAny 数组字段匹配任一值", () => {
+    const db = makeDb();
+    db.insert<Record<string, unknown>>("logs", { status: "TAGGED", amount: 10, createdAt: new Date(), tags: ["a", "b"] } as Record<string, unknown>);
+    const result = db.query<Record<string, unknown>>("logs", { tags: { containsAny: ["a", "z"] } });
+    expect(result).toHaveLength(1);
+  });
+
+  it("containsAll 数组字段匹配全部值", () => {
+    const db = makeDb();
+    db.insert<Record<string, unknown>>("logs", { status: "TAGGED", amount: 10, createdAt: new Date(), tags: ["a", "b", "c"] } as Record<string, unknown>);
+    const result = db.query<Record<string, unknown>>("logs", { tags: { containsAll: ["a", "c"] } });
+    expect(result).toHaveLength(1);
+  });
+
+  it("containsAny 非数组字段 → false", () => {
+    const db = makeDb();
+    const result = db.query<PaymentLog>("logs", { status: { containsAny: ["SUCCESS"] } });
+    expect(result).toHaveLength(0);
+  });
+});
+
 describe("createMockDb — queryOne", () => {
   it("queryOne 返回第一条匹配，无匹配返回 undefined", () => {
     const db = makeDb();

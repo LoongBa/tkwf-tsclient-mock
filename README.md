@@ -460,6 +460,7 @@ npm install --save-dev zod@^4
 | **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | ✅ 已实现 |
 | **v1.3.0** | 录制回放（record-replay） | ✅ 已实现 |
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | ✅ 已实现 |
+| **v1.5.0** | 查询语义增强（FilterInput 操作符扩展） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 

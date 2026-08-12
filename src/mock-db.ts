@@ -1,8 +1,16 @@
 export type DatasetSeed = Record<string, Record<string, unknown>[]>;
 
 /**
+ * 字符串模式匹配大小写模式（Prisma 风格）。
+ * - `default`：区分大小写（默认）
+ * - `insensitive`：不区分大小写（比较前 toLowerCase）
+ */
+export type QueryMode = "default" | "insensitive";
+
+/**
  * 单字段谓词：eq/neq/contains/gt/gte/lt/lte/in/nin
  * + OperationFilterInput 家族反向操作符（ngt/ngte/nlt/nlte/ncontains/nstartsWith/nendsWith/isTrue/isFalse）
+ * + v1.5.0 新增（isNull/between/mode/containsAny/containsAll）
  */
 export interface FilterPredicate {
   eq?: unknown;
@@ -25,6 +33,12 @@ export interface FilterPredicate {
   nendsWith?: string;
   isTrue?: boolean;
   isFalse?: boolean;
+  // v1.5.0 新增
+  isNull?: boolean;                       // 空值检测：字段为 null/undefined 时匹配
+  between?: readonly [unknown, unknown];  // 闭区间 [low, high]：low <= value <= high（含边界）
+  mode?: QueryMode;                       // 字符串模式匹配大小写（仅影响 contains/startsWith/endsWith 及 n 前缀）
+  containsAny?: readonly unknown[];       // 数组字段：包含任一值（compareValues 比较）
+  containsAll?: readonly unknown[];       // 数组字段：包含全部值（compareValues 比较）
 }
 
 /**
@@ -111,7 +125,9 @@ type OperatorName =
   | "contains" | "ncontains"
   | "startsWith" | "nstartsWith"
   | "endsWith" | "nendsWith"
-  | "isTrue" | "isFalse";
+  | "isTrue" | "isFalse"
+  // v1.5.0 新增（mode 是修饰符，不进操作符表）
+  | "isNull" | "between" | "containsAny" | "containsAll";
 
 type OperatorEvaluator = (rowValue: unknown, operand: unknown) => boolean;
 
@@ -140,6 +156,27 @@ const OPERATOR_EVALUATORS: Record<OperatorName, OperatorEvaluator> = {
   // isTrue/isFalse：operand=true 时激活过滤（值 === true / 值 === false）；operand=false 时条件不生效
   isTrue: (rv, op) => (op === true ? rv === true : true),
   isFalse: (rv, op) => (op === true ? rv === false : true),
+  // v1.5.0：isNull 惰性（非 true 放行，对齐 isTrue/isFalse）；非 null 字段由求值器处理
+  isNull: (rv, op) => (op === true ? rv === null || rv === undefined : true),
+  // between：闭区间 [low, high]（含边界）；非数组或长度不足 → false（防御性校验）
+  between: (rv, op) => {
+    if (!Array.isArray(op) || op.length < 2) return false;
+    const [low, high] = op.slice(0, 2) as [unknown, unknown];
+    return compareValues(rv, low) >= 0 && compareValues(rv, high) <= 0;
+  },
+  // containsAny/containsAll：字段值是数组，检查是否包含任一/全部目标值（compareValues 比较，与 in 一致）
+  containsAny: (rv, op) => {
+    if (!Array.isArray(rv) || !Array.isArray(op)) return false;
+    return (op as readonly unknown[]).some((v) =>
+      (rv as unknown[]).some((rvItem) => compareValues(rvItem, v) === 0),
+    );
+  },
+  containsAll: (rv, op) => {
+    if (!Array.isArray(rv) || !Array.isArray(op)) return false;
+    return (op as readonly unknown[]).every((v) =>
+      (rv as unknown[]).some((rvItem) => compareValues(rvItem, v) === 0),
+    );
+  },
 };
 
 // ─── 过滤引擎 ───────────────────────────────────────────────
@@ -165,10 +202,31 @@ function matchRow(row: Record<string, unknown>, filter: Record<string, unknown>,
     if (!predicate || typeof predicate !== "object" || Array.isArray(predicate)) continue;
 
     const rowValue = row[key];
-    for (const [op, operand] of Object.entries(predicate as Record<string, unknown>)) {
+    const predObj = predicate as Record<string, unknown>;
+
+    // null 门控（v1.5.0）：字段为 null/undefined 时，仅 isNull 操作符生效
+    if (rowValue === null || rowValue === undefined) {
+      const isNullOp = predObj["isNull"];
+      if (isNullOp !== undefined) return isNullOp === true;
+      return false; // 其他操作符对 null 均返回 false
+    }
+
+    // mode 提取（v1.5.0）：同字段的 mode 修饰符
+    const mode = predObj["mode"] as QueryMode | undefined;
+    const STRING_OPS = new Set(["contains", "ncontains", "startsWith", "nstartsWith", "endsWith", "nendsWith"]);
+
+    for (const [op, operand] of Object.entries(predObj)) {
       const evaluate = OPERATOR_EVALUATORS[op as OperatorName];
-      if (!evaluate) continue; // 未知键（如嵌套对象字段）→ 忽略
-      if (!evaluate(rowValue, operand)) return false;
+      if (!evaluate) continue; // 未知键（如嵌套对象字段、mode 修饰符）→ 忽略
+
+      // mode 归一化：对 6 个字符串模式操作符，不区分大小写比较
+      let effectiveRv: unknown = rowValue;
+      let effectiveOp: unknown = operand;
+      if (mode === "insensitive" && STRING_OPS.has(op)) {
+        effectiveRv = String(rowValue).toLowerCase();
+        effectiveOp = String(operand).toLowerCase();
+      }
+      if (!evaluate(effectiveRv, effectiveOp)) return false;
     }
   }
 

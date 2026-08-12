@@ -19,6 +19,7 @@ export type {
   DatasetSeed,
   FilterPredicate,
   FilterInput,
+  QueryMode,
   SortInput,
   CursorPage,
   OffsetPage,
