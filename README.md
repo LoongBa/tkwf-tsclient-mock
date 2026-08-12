@@ -91,6 +91,7 @@ Tkwf.configure("default", {
 | `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用，泛型约束 field/args/result） |
 | `createScenarioContext()` | 场景协调器：`setScenario` 联动 db 数据集 + transport 注入，一键切换默认/空态/错误态/加载态 |
 | `createRecordingTransport()` | 录制回放装饰器：record/replay/passthrough 三态模式，真实请求录制 → 测试回放 |
+| `mockFieldSchemaToZod()` | 运行时契约校验：`MockFieldSchema → zod` 适配器，`validateMock` 底层基于 zod safeParse |
 
 ---
 
@@ -400,10 +401,57 @@ normalizeUuids("550e8400-e29b-41d4-a716-446655440000");  // → "00000000-0000-0
 
 ---
 
+## 运行时契约校验（v1.4.0）
+
+mock 数据经过**真实 schema 校验**（基于 zod v4），AI 填充错误被自愈重试捕获。
+
+### MockFieldSchema → zod 适配器
+
+`mockFieldSchemaToZod(schema)` 将 7 种 kind（string/number/boolean/date/enum/array/object）递归映射为 zod schema：
+
+```typescript
+import { mockFieldSchemaToZod, validateWithZod } from "@tkwf/tsclient-mock";
+
+// 直接校验数据
+const result = validateWithZod(PaymentLogSchema, agentData);
+if (!result.ok) {
+  console.log(result.errors);   // ["$.status: Invalid option: expected one of ..."]
+  console.log(result.issues);   // [{ code, path, message }] 结构化问题
+}
+```
+
+### 语义保留（对齐旧 validateMock）
+
+| 语义 | 实现 |
+|------|------|
+| `undefined` 不报错（未填充） | 顶层 `.optional()` |
+| object 缺失/多出字段不报错 | `.partial()` + strip |
+| 空 `enumValues` 放行 | 降级 `z.union([z.string(), z.number()])` |
+| date 兼容 Date / ISO string / number 时间戳 | `z.union([z.iso.datetime(), z.date(), z.number()])` |
+
+### codegen 运行时校验骨架
+
+`gen-mock-handlers` 生成的产物新增 `validateXxx(data)` 辅助函数（动态 import，不调用不加载 zod）：
+
+```typescript
+const result = await validatePaymentLog(agentData);  // zod safeParse 结果
+if (!result.success) console.log(result.error.issues);
+```
+
+### 依赖
+
+`zod@^4` 作为 **peerDependency**——消费端需自行安装（仅校验功能需要）：
+
+```bash
+npm install --save-dev zod@^4
+```
+
+---
+
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.3.0 内容。
+> 当前实现 = v1.4.0 内容。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
@@ -411,7 +459,7 @@ normalizeUuids("550e8400-e29b-41d4-a716-446655440000");  // → "00000000-0000-0
 | **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers`）+ AI 编排基础设施（validateMock / selfHealing / detectChange）+ mock-db 过滤桥接增强 | ✅ 已实现 |
 | **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | ✅ 已实现 |
 | **v1.3.0** | 录制回放（record-replay） | ✅ 已实现 |
-| **v1.4.0** | 运行时契约校验（TS 类型 → zod） | P4：mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
+| **v1.4.0** | 运行时契约校验（TS 类型 → zod） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 

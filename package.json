@@ -38,6 +38,10 @@
   "devDependencies": {
     "@tkwf/tsclient": "file:../tkwf-tsclient",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "zod": "^4.4.3"
   }
 }

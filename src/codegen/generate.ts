@@ -67,6 +67,10 @@ export function generate(source: string, inputPath: string, outputPath: string):
   }));
   lines.push(tpl.dtoTypeSchemas(dtoBlocks));
 
+  // 运行时校验骨架（v1.4.0）
+  const schemaNames = Object.keys(dtoSchemas);
+  lines.push(tpl.validateZodHelpers(schemaNames));
+
   // field handlers
   lines.push("// ── field handlers（骨架：db 操作已生成，Agent 只填业务意图） ──");
   lines.push("export const handlers = {");

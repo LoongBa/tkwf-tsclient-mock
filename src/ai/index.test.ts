@@ -33,8 +33,8 @@ describe("validateMock", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join("\n")).toContain("$.id");
     expect(result.errors.join("\n")).toContain("$.name");
-    expect(result.errors.join("\n")).toContain("$.role: 期望枚举值之一 [ADMIN, USER]");
-    expect(result.errors.join("\n")).toContain("$.tags: 期望 array");
+    expect(result.errors.join("\n")).toContain("$.role: Invalid option");
+    expect(result.errors.join("\n")).toContain("$.tags: Invalid input: expected array");
   });
 
   it("undefined 不报错（未填充由 Agent 决定）,缺失字段不报错", () => {

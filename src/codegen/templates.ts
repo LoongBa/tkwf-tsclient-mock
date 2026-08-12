@@ -180,6 +180,37 @@ function schemaLiteralElement(
 }
 
 /**
+ * 生成运行时校验辅助函数（v1.4.0）。
+ * 使用动态 import 避免强制消费端安装 zod（Oracle 审查 🔴4）。
+ * DTO schema 常量是 `Record<string, MockFieldSchema>`（object fields 模式），
+ * 校验时包装为 `{ kind: "object", fields: XxxSchema }`。
+ * @param schemaNames DTO schema 常量名列表
+ */
+export function validateZodHelpers(schemaNames: string[]): string {
+  if (schemaNames.length === 0) return "";
+  const funcs = schemaNames
+    .map(
+      (name) => [
+        `export async function validate${name}(data: unknown) {`,
+        `  try {`,
+        `    const { mockFieldSchemaToZod } = await import("@tkwf/tsclient-mock");`,
+        `    return mockFieldSchemaToZod({ kind: "object", fields: { ...${name}Schema } }).safeParse(data);`,
+        `  } catch {`,
+        `    throw new Error("zod is required for runtime validation. Run: npm install zod@^4");`,
+        `  }`,
+        `};`,
+      ].join("\n"),
+    )
+    .join("\n\n");
+  return [
+    "",
+    "// ── 运行时校验辅助（v1.4.0，动态 import，不调用不加载 zod） ──",
+    funcs,
+    "",
+  ].join("\n");
+}
+
+/**
  * 生成 handler 的 defineMock 包装。
  * @param fieldName field 名
  * @param argsTypeName args 类型名（如 "PaymentLogsArgs"）

@@ -53,3 +53,6 @@ export type {
 } from "./record-replay.js";
 
 export { FileRecordingStore } from "./file-recording-store.js";
+
+export { mockFieldSchemaToZod, validateWithZod } from "./zod.js";
+export type { ValidateIssue, ValidateWithZodResult } from "./zod.js";

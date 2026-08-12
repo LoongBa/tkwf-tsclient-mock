@@ -1,4 +1,5 @@
 import type { MockFieldSchema } from "../factory.js";
+import { mockFieldSchemaToZod, formatPath } from "../zod.js";
 
 /**
  * AI 编排基础设施 —— 为消费端 AI/Agent 填充 mock 数据提供验证、自愈、变更检测能力。
@@ -12,107 +13,29 @@ export interface ValidateResult {
 }
 
 /**
- * 校验 mock 数据是否符合 DTO schema（复用 MockFieldSchema）。
+ * 校验 mock 数据是否符合 DTO schema（底层使用 zod safeParse）。
  *
- * 规则：
- * - `string` → typeof 为 string
- * - `number` → typeof 为 number（且非 NaN）
- * - `boolean` → typeof 为 boolean
- * - `date` → 接受 Date 实例或可 parse 的字符串/数字
- * - `enum` → 值在 enumValues 内（enumValues 为空时跳过校验，等待 Agent 填充）
- * - `object` → 递归校验 fields 子集（缺失字段不报错，多出字段不报错）
- * - `array` → 数组且元素逐一校验
- * - 数据为 undefined 时不报错（视为"未填充"，由 Agent 决定）
+ * v1.4.0 迁移：原手写 switch 校验替换为 mockFieldSchemaToZod 适配器 + zod safeParse。
+ * 语义保持与之前一致：
+ * - undefined 不报错（视为"未填充"）
+ * - object 缺失字段不报错，多出字段不报错
+ * - enumValues 为空时放行（等待 Agent 填充）
+ * - date 接受 Date 实例 / ISO 8601 字符串 / number 时间戳
+ *
+ * 注意：错误消息从中文变为英文（zod 默认），格式由 `$: 期望 string，实际 number` 变为 `$: Expected string, received number`。
  */
-export function validateMock(data: unknown, schema: MockFieldSchema, path = "$"): ValidateResult {
-  if (data === undefined) return { ok: true, errors: [] };
-
-  const errors: string[] = [];
-
-  switch (schema.kind) {
-    case "string": {
-      if (typeof data !== "string") {
-        errors.push(`${path}: 期望 string，实际 ${describeType(data)}`);
-      }
-      break;
-    }
-    case "number": {
-      if (typeof data !== "number" || Number.isNaN(data)) {
-        errors.push(`${path}: 期望 number，实际 ${describeType(data)}`);
-      }
-      break;
-    }
-    case "boolean": {
-      if (typeof data !== "boolean") {
-        errors.push(`${path}: 期望 boolean，实际 ${describeType(data)}`);
-      }
-      break;
-    }
-    case "date": {
-      if (!isDateLike(data)) {
-        errors.push(`${path}: 期望 Date/可解析日期，实际 ${describeType(data)}`);
-      }
-      break;
-    }
-    case "enum": {
-      if (schema.enumValues && schema.enumValues.length > 0) {
-        if (!schema.enumValues.includes(data as string | number)) {
-          errors.push(`${path}: 期望枚举值之一 [${schema.enumValues.join(", ")}]，实际 ${String(data)}`);
-        }
-      }
-      // enumValues 为空 → 无法校验，跳过（Agent 填充后由消费端 SKILL 校验）
-      break;
-    }
-    case "object": {
-      if (typeof data !== "object" || data === null || Array.isArray(data)) {
-        errors.push(`${path}: 期望 object，实际 ${describeType(data)}`);
-        break;
-      }
-      for (const [key, fieldSchema] of Object.entries(schema.fields ?? {})) {
-        const child = (data as Record<string, unknown>)[key];
-        if (child === undefined || fieldSchema === undefined) continue; // 缺失字段不报错
-        errors.push(...validateMock(child, fieldSchema, `${path}.${key}`).errors);
-      }
-      break;
-    }
-    case "array": {
-      if (!Array.isArray(data)) {
-        errors.push(`${path}: 期望 array，实际 ${describeType(data)}`);
-        break;
-      }
-      if (schema.element) {
-        data.forEach((item, i) => {
-          const element = schema.element;
-          if (element) {
-            errors.push(...validateMock(item, element, `${path}[${i}]`).errors);
-          }
-        });
-      }
-      break;
-    }
-    default:
-      // 未知 kind：保守放行
-      break;
-  }
-
-  return { ok: errors.length === 0, errors };
-}
-
-/** 判断值是否为 Date 或可解析的日期（字符串/数字）。 */
-function isDateLike(value: unknown): boolean {
-  if (value instanceof Date) return !Number.isNaN(value.getTime());
-  if (typeof value === "string" || typeof value === "number") {
-    const t = new Date(value).getTime();
-    return !Number.isNaN(t);
-  }
-  return false;
-}
-
-/** 描述值的实际类型（用于错误信息）。 */
-function describeType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  return typeof value;
+export function validateMock(data: unknown, schema: MockFieldSchema, _path = "$"): ValidateResult {
+  const zodSchema = mockFieldSchemaToZod(schema);
+  const result = zodSchema.safeParse(data);
+  if (result.success) return { ok: true, errors: [] };
+  return {
+    ok: false,
+    errors: result.error.issues.map((issue) => {
+      if (issue.path.length === 0) return `${_path}: ${issue.message}`;
+      const inner = formatPath(issue.path.filter((s): s is string | number => typeof s !== "symbol")).slice(1); // 去掉前导 "$"
+      return `${_path}${inner}: ${issue.message}`;
+    }),
+  };
 }
 
 /**

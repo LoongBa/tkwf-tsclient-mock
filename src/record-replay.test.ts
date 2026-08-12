@@ -58,6 +58,15 @@ describe("MemoryRecordingStore — 内存录制存储", () => {
     expect(recording?.version).toBe("1.3.0");
   });
 
+  it("录制会话名含 scenario 元数据", () => {
+    store.start("test-session", { scenario: "paymentLogs-error" });
+    store.record(makeEntry("paymentLog", { result: {} }));
+    const recording = store.stop();
+
+    expect(recording?.name).toBe("test-session");
+    expect(recording?.scenario).toBe("paymentLogs-error");
+  });
+
   it("生命周期约束：record 在 start 之前调用抛错", () => {
     expect(() => store.record(makeEntry("paymentLog"))).toThrow(/no active session/);
   });
@@ -121,6 +130,26 @@ describe("createRecordingTransport — record 模式", () => {
     expect(rec?.entries[0]?.error?.source).toBe("transport");
   });
 
+  it("record：executeRawGraphQL 记录条目，field 从 query 提取", async () => {
+    const store = new MemoryRecordingStore();
+    const inner = makeFakeTransport(() => ({ nodes: [1] }));
+    const transport = createRecordingTransport(inner, {
+      mode: "record",
+      recordingName: "rec",
+      store,
+    });
+
+    store.start("rec");
+    const result = await transport.executeRawGraphQL("query { paymentLogs(first: 10) { nodes } }");
+    store.stop();
+
+    expect(result).toEqual({ nodes: [1] });
+    const rec = store.load("rec");
+    expect(rec?.entries).toHaveLength(1);
+    expect(rec?.entries[0]?.field).toBe("paymentLogs");
+    expect(rec?.entries[0]?.type).toBe("query");
+  });
+
   it("record：normalizeResult 在录制时运行，存储的是归一化后的数据", async () => {
     const store = new MemoryRecordingStore();
     const inner = makeFakeTransport(() => ({ createdAt: "2026-05-01T12:00:00.000Z" } as unknown));
@@ -143,6 +172,73 @@ describe("createRecordingTransport — record 模式", () => {
 });
 
 describe("createRecordingTransport — replay 模式", () => {
+  it("replay：order=true 按 FIFO 顺序消费，先 A 后 B", async () => {
+    const store = new MemoryRecordingStore();
+    seedRecording(store, "rec", [
+      makeEntry("first", { variables: { id: 1 }, result: "A" }),
+      makeEntry("second", { variables: { id: 2 }, result: "B" }),
+    ]);
+    const transport = createRecordingTransport(makeFakeTransport(() => ({})), {
+      mode: "replay",
+      recordingName: "rec",
+      store,
+      order: true,
+    });
+
+    await expect(transport.execute({ field: "first", type: "query", variables: { id: 1 } })).resolves.toBe("A");
+    await expect(transport.execute({ field: "second", type: "query", variables: { id: 2 } })).resolves.toBe("B");
+  });
+
+  it("replay：order=true 时跳过当前 FIFO 位置的请求视为未命中", async () => {
+    const store = new MemoryRecordingStore();
+    seedRecording(store, "rec", [
+      makeEntry("first", { result: "A" }),
+      makeEntry("second", { result: "B" }),
+    ]);
+    const transport = createRecordingTransport(makeFakeTransport(() => ({})), {
+      mode: "replay",
+      recordingName: "rec",
+      store,
+      order: true,
+    });
+
+    // FIFO 位置 0 是 first，请求 second 不匹配 → 未命中
+    await expect(transport.execute({ field: "second", type: "query" })).rejects.toThrow(/no recorded response/);
+  });
+
+  it("replay：order=false 无序匹配，可跳过不匹配条目", async () => {
+    const store = new MemoryRecordingStore();
+    seedRecording(store, "rec", [
+      makeEntry("first", { result: "A" }),
+      makeEntry("second", { result: "B" }),
+    ]);
+    const transport = createRecordingTransport(makeFakeTransport(() => ({})), {
+      mode: "replay",
+      recordingName: "rec",
+      store,
+      order: false,
+    });
+
+    // 无序模式下直接请求 second → 命中
+    await expect(transport.execute({ field: "second", type: "query" })).resolves.toBe("B");
+  });
+
+  it("replay：variables 为 undefined 时归一化为 {} 匹配", async () => {
+    const store = new MemoryRecordingStore();
+    seedRecording(store, "rec", [
+      makeEntry("q", { result: "no-vars" }),
+    ]);
+    const transport = createRecordingTransport(makeFakeTransport(() => ({})), {
+      mode: "replay",
+      recordingName: "rec",
+      store,
+    });
+
+    // 录制时无 variables（undefined），回放时也无 variables → 匹配
+    const result = await transport.execute({ field: "q", type: "query" });
+    expect(result).toBe("no-vars");
+  });
+
   it("replay：命中返回录制 result", async () => {
     const store = new MemoryRecordingStore();
     seedRecording(store, "rec", [
