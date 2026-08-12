@@ -32,8 +32,12 @@
 
 ### 不做什么
 
-> **不做 HTTP 层 mock server（MSW 式）**——那属 ApiService 层职责，应由后端提供内存 mock。
-> `@tkwf/tsclient-mock` 只做 **Transport 接口层**的注入，更接近协议语义。
+> **HTTP mock server 已作为 v1.8.0 功能新增**（见下方章节）。
+> 以下仍不属于本包范围：
+
+- **不做 HTTP 层 mock server（MSW 式）**——那属 ApiService 层职责，由 v1.8.0 `MockHttpServer` 在 `@tkwf/tsclient-mock` 内实现（走 `node:http`，零外部依赖）
+- 不做运行时契约校验与 mock 数据的自动缝合（AI 编排场景由消费端 SKILL 落地）
+- 不做多语言 mock 运行时（仅 TypeScript 消费端）
 
 ---
 
@@ -94,6 +98,7 @@ Tkwf.configure("default", {
 | `mockFieldSchemaToZod()` | 运行时契约校验：`MockFieldSchema → zod` 适配器，`validateMock` 底层基于 zod safeParse |
 | `registerRelation()` | 关联过滤嵌套：`registerRelation` 声明外键关系，`some`/`every`/`none` 关联查询 |
 | `aggregate()` | 聚合查询：`db.aggregate(table, { fields })` 支持 count/avg/sum/max/min |
+| `MockHttpServer` | HTTP mock server：基于 node:http 的轻量 HTTP 层 mock，CORS/鉴权/GraphQL over HTTP |
 
 ---
 
@@ -465,6 +470,7 @@ npm install --save-dev zod@^4
 | **v1.5.0** | 查询语义增强（FilterInput 操作符扩展） | ✅ 已实现 |
 | **v1.6.0** | 关联过滤嵌套（some/every/none） | ✅ 已实现 |
 | **v1.7.0** | 关系增强（双向同步 + codegen 关系推导 + 聚合过滤） | ✅ 已实现 |
+| **v1.8.0** | HTTP mock server（基于 node:http 的轻量 HTTP 层 mock） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 

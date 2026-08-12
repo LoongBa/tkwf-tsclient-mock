@@ -43,6 +43,12 @@ export type { ScenarioContext, ScenarioConfig, FieldOption, BuiltinScenario } fr
 export { validateMock, selfHealing, detectChange, sha256, configureSidecar } from "./ai/index.js";
 export type { ValidateResult, SidecarStore } from "./ai/index.js";
 
+export { MockHttpServer } from "./http-mock/server.js";
+export type { MockHttpServerOptions } from "./http-mock/server.js";
+
+export { GraphQLHandler } from "./http-mock/graphql-handler.js";
+export type { GraphQLRequestBody, GraphQLHandlerResult } from "./http-mock/graphql-handler.js";
+
 export {
   createRecordingTransport,
   configureRecordingStore,
