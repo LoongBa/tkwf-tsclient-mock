@@ -132,16 +132,20 @@ Mirage 证明了 mutation→query 联动是刚需，但**无人把"类型驱动�
 
 ---
 
-## 未来规划
+## 未来规划（版本路线图）
 
-| 方向 | 优先级 | 说明 |
-|------|--------|------|
-| **消费端 codegen 扩展**（`gen-mock-handlers.ts`） | P1 | 生成全部 field 的 handler 骨架（`ts-client.mock.g.ts`），Agent 不可能漏掉 API |
-| **场景切换**（`setScenario`） | P3 | 一套 mock 多套数据：默认/空态/错误态/加载态，Storybook 友好 |
-| **录制回放**（record-replay） | P3 | 真实请求 HAR 导入 → 回放，测试用真实数据而非手工 mock |
-| **运行时契约校验**（TS 类型 → zod） | P4 | mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
-| **AI 填充编排层** | P1 | 类型骨架 → 产品 hint → LLM 输出 → schema 验证 → hash 检测变更重新生成（Airbnb @generateMock 实践） |
-| **分阶段策略落地** | P2 | 原型(工厂+satisfies) → 开发(种子+Storybook) → 测试(Pact/HAR) |
+> 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
+> 当前实现 = v1.0.0 内容（v0.1.x 为预发布内部迭代代号）。
+
+| 版本 | 内容 | 说明 |
+|------|------|------|
+| **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现，package.json 已为 1.0.0 |
+| **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers.ts`）+ AI 填充编排层 | P1：生成全部 field 的 handler 骨架（`ts-client.mock.g.ts`），Agent 不可能漏掉 API |
+| **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | P3/P2：默认/空态/错误态/加载态，Storybook 友好；原型→开发→测试分阶段 |
+| **v1.3.0** | 录制回放（record-replay） | P3：真实请求 HAR 导入 → 回放，测试用真实数据而非手工 mock |
+| **v1.4.0** | 运行时契约校验（TS 类型 → zod） | P4：mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
+
+主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 
 ---
 
