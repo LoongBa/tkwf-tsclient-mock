@@ -56,6 +56,12 @@ export interface OffsetPage {
 
 export type PageInput = CursorPage | OffsetPage;
 
+export interface MockDbOptions {
+  seed?: number;
+  /** 命名数据集字典：key 为数据集名，value 为 DatasetSeed（可选） */
+  datasets?: Record<string, DatasetSeed>;
+}
+
 export interface MockDb {
   /** 注册查询 handler：field → 从表读取 */
   registerQuery(field: string, table: string): void;
@@ -76,8 +82,14 @@ export interface MockDb {
   remove(table: string, id: string | number): boolean;
   /** 批量种子数据导入 */
   buildDataset(dataset: DatasetSeed): void;
-  /** 重置到初始种子状态（保留 field→table 映射） */
-  reset(): void;
+  /** 重置数据：无参时重置当前数据集到初始快照；传 name 时切换到该数据集并重置 */
+  reset(name?: string): void;
+  /** 切换当前数据集到指定名称，不存在则抛出错误 */
+  switchDataset(name: string): void;
+  /** 获取当前数据集名称，默认为 "default" */
+  getDatasetName(): string;
+  /** 列出所有可用数据集名称（含默认的 "default"） */
+  listDatasets(): string[];
 }
 
 // ─── 混合类型比较 ───────────────────────────────────────────
@@ -242,23 +254,64 @@ function paginateRows(
 // ─── createMockDb ───────────────────────────────────────────
 
 export function createMockDb(
-  _entities: Record<string, unknown>,
-  _options?: { seed?: number },
+  _entities: DatasetSeed,
+  _options?: MockDbOptions,
 ): MockDb {
   const tables = new Map<string, Map<string | number, Record<string, unknown>>>();
   const snapshots = new Map<string, Map<string | number, Record<string, unknown>>>();
   const fieldTableMap = new Map<string, string>();
+  const datasetSnapshots = new Map<string, Map<string, Map<string | number, Record<string, unknown>>>>();
+  let currentDatasetName = "default";
 
-  // 初始化表
-  for (const [name, data] of Object.entries(_entities)) {
-    const rows = Array.isArray(data) ? data : [];
-    const table = new Map<string | number, Record<string, unknown>>();
-    for (const row of rows as Record<string, unknown>[]) {
-      const id = (row.id ?? row.Id) as string | number;
-      if (id !== undefined) table.set(id, { ...row });
+  // 从 DatasetSeed 构建表 Map
+  function buildTablesFromSeed(seed: DatasetSeed): Map<string, Map<string | number, Record<string, unknown>>> {
+    const result = new Map<string, Map<string | number, Record<string, unknown>>>();
+    for (const [name, data] of Object.entries(seed)) {
+      const rows = Array.isArray(data) ? data : [];
+      const table = new Map<string | number, Record<string, unknown>>();
+      for (const row of rows as Record<string, unknown>[]) {
+        const id = (row.id ?? row.Id) as string | number;
+        if (id !== undefined) table.set(id, { ...row });
+      }
+      result.set(name, table);
     }
+    return result;
+  }
+
+  // 初始化 default 数据集（_entities 参数）
+  const defaultTables = buildTablesFromSeed(_entities);
+  for (const [name, table] of defaultTables) {
     tables.set(name, table);
     snapshots.set(name, new Map(table));
+  }
+  datasetSnapshots.set("default", new Map());
+  for (const [name, table] of defaultTables) {
+    datasetSnapshots.get("default")!.set(name, new Map(table));
+  }
+
+  // 初始化附加数据集（允许覆盖 default）
+  if (_options?.datasets) {
+    for (const [dsName, seed] of Object.entries(_options.datasets)) {
+      const dsTables = buildTablesFromSeed(seed);
+      datasetSnapshots.set(dsName, dsTables);
+    }
+  }
+
+  /** 加载指定数据集到当前 tables + snapshots */
+  function loadDataset(name: string): void {
+    const ds = datasetSnapshots.get(name);
+    if (!ds) {
+      throw new Error(
+        `MockDb: dataset "${name}" not found, available: ${[...datasetSnapshots.keys()].join(", ")}`,
+      );
+    }
+    tables.clear();
+    snapshots.clear();
+    for (const [tableName, tableMap] of ds) {
+      tables.set(tableName, new Map(tableMap));
+      snapshots.set(tableName, new Map(tableMap));
+    }
+    currentDatasetName = name;
   }
 
   function nextId(table: string): number {
@@ -365,11 +418,26 @@ export function createMockDb(
       }
     },
 
-    reset(): void {
-      tables.clear();
-      for (const [name, snapshot] of snapshots) {
-        tables.set(name, new Map(snapshot));
+    reset(name?: string): void {
+      if (name !== undefined) {
+        loadDataset(name);
       }
+      tables.clear();
+      for (const [tableName, snapshot] of snapshots) {
+        tables.set(tableName, new Map(snapshot));
+      }
+    },
+
+    switchDataset(name: string): void {
+      loadDataset(name);
+    },
+
+    getDatasetName(): string {
+      return currentDatasetName;
+    },
+
+    listDatasets(): string[] {
+      return [...datasetSnapshots.keys()];
     },
   };
 }

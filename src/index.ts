@@ -15,6 +15,7 @@ export type { MockFactory, MockFactoryOptions, MockFieldSchema } from "./factory
 export { createMockDb, encodeCursor, decodeCursor } from "./mock-db.js";
 export type {
   MockDb,
+  MockDbOptions,
   DatasetSeed,
   FilterPredicate,
   FilterInput,
@@ -28,6 +29,9 @@ export { defaultSessionHandlers } from "./session.js";
 
 export { defineMock } from "./define-mock.js";
 export type { MockFieldContract } from "./define-mock.js";
+
+export { createScenarioContext } from "./scenario.js";
+export type { ScenarioContext, ScenarioConfig, FieldOption, BuiltinScenario } from "./scenario.js";
 
 export { validateMock, selfHealing, detectChange, sha256, configureSidecar } from "./ai/index.js";
 export type { ValidateResult, SidecarStore } from "./ai/index.js";

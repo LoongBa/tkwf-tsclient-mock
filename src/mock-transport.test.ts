@@ -139,4 +139,156 @@ describe("MockTransport", () => {
       transport.executeRawGraphQL("not a query at all"),
     ).rejects.toThrow(/unable to extract field from raw query/);
   });
+
+  it("switches scenario via setScenario and reports getScenario", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          error: { error: new Error("scenario error") },
+          loading: { delayMs: 10 },
+        },
+      },
+    );
+
+    expect(transport.getScenario()).toBe("default");
+    transport.setScenario("error");
+    expect(transport.getScenario()).toBe("error");
+    transport.setScenario("loading");
+    expect(transport.getScenario()).toBe("loading");
+  });
+
+  it("reports all scenario names including default", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          error: {},
+          loading: {},
+        },
+      },
+    );
+
+    const names = transport.getScenarioNames();
+    expect(names).toContain("default");
+    expect(names).toContain("error");
+    expect(names).toContain("loading");
+  });
+
+  it("passes current scenario name via ctx.scenario", async () => {
+    const scenariosSeen: string[] = [];
+    const transport = new MockTransport(
+      {
+        ping: (_vars, ctx) => {
+          scenariosSeen.push(ctx.scenario ?? "");
+          return { pong: true };
+        },
+      },
+      {
+        scenarios: {
+          empty: {},
+        },
+      },
+    );
+
+    await transport.execute({ field: "ping", type: "query" });
+    expect(scenariosSeen).toEqual(["default"]);
+
+    transport.setScenario("empty");
+    await transport.execute({ field: "ping", type: "query" });
+    expect(scenariosSeen).toEqual(["default", "empty"]);
+  });
+
+  it("applies scenario fieldOptions error injection", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          error: { fieldOptions: { ping: { error: new Error("scenario field error") } } },
+        },
+      },
+    );
+
+    transport.setScenario("error");
+    await expect(
+      transport.execute({ field: "ping", type: "query" }),
+    ).rejects.toThrow("scenario field error");
+  });
+
+  it("applies scenario fieldOptions failRate injection", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          error: { fieldOptions: { ping: { failRate: 1 } } },
+        },
+      },
+    );
+
+    transport.setScenario("error");
+    await expect(
+      transport.execute({ field: "ping", type: "query" }),
+    ).rejects.toThrow(/simulated failure for "ping"/);
+  });
+
+  it("applies scenario delayMs for loading state", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          loading: { delayMs: 10 },
+        },
+      },
+    );
+
+    transport.setScenario("loading");
+    const start = Date.now();
+    await transport.execute({ field: "ping", type: "query" });
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(8);
+  });
+
+  it("gives scenario injections priority over global fieldOptions", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        fieldOptions: { ping: { error: new Error("global error") } },
+        scenarios: {
+          error: { fieldOptions: { ping: { error: new Error("scenario error") } } },
+        },
+      },
+    );
+
+    transport.setScenario("error");
+    await expect(
+      transport.execute({ field: "ping", type: "query" }),
+    ).rejects.toThrow("scenario error");
+  });
+
+  it("applies scenario-level error shortcut to all fields", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      {
+        scenarios: {
+          error: { error: new Error("scenario-wide error") },
+        },
+      },
+    );
+
+    transport.setScenario("error");
+    await expect(
+      transport.execute({ field: "ping", type: "query" }),
+    ).rejects.toThrow("scenario-wide error");
+  });
+
+  it("throws when switching to a nonexistent scenario", async () => {
+    const transport = new MockTransport(
+      { ping: () => ({ pong: true }) },
+      { scenarios: { error: {} } },
+    );
+
+    expect(() => transport.setScenario("nope")).toThrow(
+      /scenario "nope" does not exist/,
+    );
+  });
 });

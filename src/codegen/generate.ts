@@ -57,6 +57,8 @@ export function generate(source: string, inputPath: string, outputPath: string):
     tableInits[table] = entityType;
   }
   lines.push(tpl.dbSkeleton(tableInits));
+  lines.push(tpl.scenariosSkeleton(tableInits));
+  lines.push(tpl.scenarioOverridesSkeleton());
 
   // DTO schema 常量
   const dtoBlocks = Object.entries(dtoSchemas).map(([name, schema]) => ({

@@ -393,3 +393,115 @@ describe("createMockDb — 排序大小写归一", () => {
     expect(ascLower.map((r) => r.amount)).toEqual([50, 75, 100, 150, 200]);
   });
 });
+
+describe("createMockDb — 多数据集", () => {
+  const busySeedForLogs: PaymentLog[] = [
+    { id: 7, status: "SUCCESS", amount: 500, createdAt: new Date("2026-02-01T00:00:00Z") },
+  ];
+
+  function makeMultiDb() {
+    return createMockDb(
+      { logs: seed },
+      {
+        datasets: {
+          empty: { logs: [] },
+          busy: { logs: busySeedForLogs },
+        },
+      },
+    );
+  }
+
+  it("datasets 初始化：listDatasets 含 default 与各命名数据集", () => {
+    const db = makeMultiDb();
+    expect(db.listDatasets()).toEqual(["default", "empty", "busy"]);
+    expect(db.getDatasetName()).toBe("default");
+    // default 数据为 _entities
+    expect(db.query<PaymentLog>("logs")).toHaveLength(5);
+  });
+
+  it("switchDataset 切换数据：数据随之切换，可切回", () => {
+    const db = makeMultiDb();
+    db.switchDataset("empty");
+    expect(db.getDatasetName()).toBe("empty");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(0);
+
+    db.switchDataset("busy");
+    expect(db.getDatasetName()).toBe("busy");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(1);
+    expect(db.query<PaymentLog>("logs")[0].id).toBe(7);
+
+    db.switchDataset("default");
+    expect(db.getDatasetName()).toBe("default");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(5);
+  });
+
+  it("switchDataset 不存在的数据集抛错，状态不变", () => {
+    const db = makeMultiDb();
+    expect(() => db.switchDataset("nonexistent")).toThrow(/not found/);
+    // 状态不变
+    expect(db.getDatasetName()).toBe("default");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(5);
+  });
+
+  it("reset() 无参重置当前活跃数据集，而非 default", () => {
+    const db = makeMultiDb();
+    db.switchDataset("busy");
+    // 在 busy 上做修改
+    db.insert<PaymentLogInput>("logs", { status: "NEW", amount: 1, createdAt: new Date() });
+    expect(db.query<PaymentLog>("logs")).toHaveLength(2);
+    db.reset();
+    // 重置回 busy 初始快照（1 条），而非 default
+    expect(db.getDatasetName()).toBe("busy");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(1);
+    expect(db.query<PaymentLog>("logs")[0].id).toBe(7);
+  });
+
+  it("reset(name) 切换到该数据集并重置，等价 switchDataset + reset", () => {
+    const db = makeMultiDb();
+    db.reset("empty");
+    expect(db.getDatasetName()).toBe("empty");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(0);
+    // 再插入并 reset("busy") → 切到 busy 初始快照
+    db.insert<PaymentLogInput>("logs", { status: "X", amount: 1, createdAt: new Date() });
+    db.reset("busy");
+    expect(db.getDatasetName()).toBe("busy");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(1);
+  });
+
+  it("向后兼容：不传 datasets 时 listDatasets 为 default，switchDataset(default) 合法、其他抛错", () => {
+    const db = makeDb(); // createMockDb({ logs: seed })
+    expect(db.listDatasets()).toEqual(["default"]);
+    expect(db.getDatasetName()).toBe("default");
+    // switchDataset("default") 合法
+    db.switchDataset("default");
+    expect(db.getDatasetName()).toBe("default");
+    // 其他名字抛错
+    expect(() => db.switchDataset("empty")).toThrow(/not found/);
+    // reset() 行为与 v1.1.0 一致
+    db.insert<PaymentLogInput>("logs", { status: "NEW", amount: 999, createdAt: new Date() });
+    expect(db.query<PaymentLog>("logs")).toHaveLength(6);
+    db.reset();
+    expect(db.query<PaymentLog>("logs")).toHaveLength(5);
+    expect(db.query<PaymentLog>("logs").map((r) => r.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("切换数据集保留 field→table 注册映射", () => {
+    const db = createMockDb(
+      { logs: seed, archive: [] },
+      {
+        datasets: {
+          empty: { logs: [], archive: [] },
+        },
+      },
+    );
+    db.registerQuery("paymentLogs", "logs");
+    db.registerMutation("createPaymentLog", "logs", "create");
+    // 切换后映射仍生效
+    db.switchDataset("empty");
+    expect(db.query<PaymentLog>("logs")).toHaveLength(0);
+    // 通过 buildDataset 灌入后 query handler 仍可路由
+    db.buildDataset({ logs: [{ id: 9, status: "SUCCESS", amount: 1, createdAt: new Date() }] });
+    expect(db.query<PaymentLog>("logs")).toHaveLength(1);
+    expect(db.query<PaymentLog>("logs")[0].id).toBe(9);
+  });
+});

@@ -23,7 +23,7 @@ export function header(): string {
 export function imports(importPath: string, typeNames: string[]): string {
   const typeImports = typeNames.filter(Boolean);
   const lines: string[] = [
-    'import type { MockHandler } from "@tkwf/tsclient-mock";',
+    'import type { MockHandler, ScenarioConfig } from "@tkwf/tsclient-mock";',
     'import { createMockDb, defineMock } from "@tkwf/tsclient-mock";',
   ];
   if (typeImports.length > 0) {
@@ -44,6 +44,48 @@ export function dbSkeleton(tableInits: Record<string, string>): string {
   return [
     "// ── 内存数据库（骨架，Agent 填充初始数据） ──",
     `export const db = createMockDb({\n${entries},\n});`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * 场景数据集骨架。
+ * 生成 default 和 empty 两个数据集，每个数据集包含所有表的空数组。
+ * @param tableInits 表名 → 实体类型名的映射
+ */
+export function scenariosSkeleton(tableInits: Record<string, string>): string {
+  const entries = Object.entries(tableInits).map(([table, type]) => {
+    if (!type || type === "unknown") {
+      return `    ${table}: [] /* TODO: 无实体类型，Agent 自行填充 */`;
+    }
+    return `    ${table}: [] satisfies ${type}[]`;
+  });
+  const block = entries.join(",\n");
+  return [
+    "// ── 场景数据集骨架（数据留 Agent 填充） ──",
+    "export const scenarios = {",
+    "  default: {",
+    block,
+    "  },",
+    "  empty: {",
+    block,
+    "  },",
+    "};",
+    "",
+  ].join("\n");
+}
+
+/**
+ * 场景注入配置骨架。
+ * 生成 error 和 loading 两个场景的注入配置骨架。
+ */
+export function scenarioOverridesSkeleton(): string {
+  return [
+    "// ── 场景注入配置骨架 ──",
+    'export const scenarioOverrides: Record<string, ScenarioConfig> = {',
+    '  error: { fieldOptions: { /* TODO: Agent 按 field 填 error / failRate */ } },',
+    '  loading: { delayMs: 3000 },',
+    "};",
     "",
   ].join("\n");
 }

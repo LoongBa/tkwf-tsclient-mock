@@ -29,7 +29,7 @@ export function defineMock(
 export function defineMock<TContract extends MockFieldContract<string, unknown, unknown>>(
   handler: (
     vars: TContract["args"] | undefined,
-    ctx: { sessionKey?: string; signal?: AbortSignal },
+    ctx: { sessionKey?: string; signal?: AbortSignal; scenario?: string },
   ) => TContract["result"] | Promise<TContract["result"]>,
 ): MockHandler;
 export function defineMock(

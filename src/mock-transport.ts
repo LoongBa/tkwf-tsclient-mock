@@ -1,26 +1,44 @@
 import type { Transport } from "@tkwf/tsclient";
 
+/** 单个 field 的注入配置 */
+export interface FieldOption {
+  delayMs?: number;
+  error?: unknown;
+  failRate?: number;
+  /** 超时模拟（ms）：handler 超时后抛 Error("Mock: timeout for <field>") */
+  timeoutMs?: number;
+}
+
+/** 场景级 transport 配置 */
+export interface ScenarioConfig {
+  /** 加载态：长延迟 */
+  delayMs?: number;
+  /** 场景级快捷注入：整场景所有 field 统一报错（fieldOptions 可逐 field 覆盖） */
+  error?: unknown;
+  /** 错误态：逐 field 注入 error / failRate / timeoutMs */
+  fieldOptions?: Record<string, FieldOption>;
+}
+
 export type MockHandler = (
   variables: Record<string, unknown> | undefined,
-  ctx: { sessionKey?: string; signal?: AbortSignal },
+  ctx: { sessionKey?: string; signal?: AbortSignal; scenario?: string },
 ) => unknown;
 
 export interface MockTransportOptions {
   /** 全局模拟延迟（ms） */
   delayMs?: number;
   /** per-field 覆盖：延迟/错误注入/超时模拟 */
-  fieldOptions?: Record<string, {
-    delayMs?: number;
-    error?: unknown;
-    failRate?: number;
-    /** 超时模拟（ms）：handler 超时后抛 Error("Mock: timeout for <field>") */
-    timeoutMs?: number;
-  }>;
+  fieldOptions?: Record<string, FieldOption>;
+  /** 初始场景名（默认 "default"） */
+  scenario?: string;
+  /** 场景配置字典 */
+  scenarios?: Record<string, ScenarioConfig>;
 }
 
 export class MockTransport implements Transport {
   private handlers: Record<string, MockHandler>;
   private options?: MockTransportOptions;
+  private scenario: string;
 
   constructor(
     handlers: Record<string, MockHandler>,
@@ -28,6 +46,35 @@ export class MockTransport implements Transport {
   ) {
     this.handlers = handlers;
     this.options = options;
+    this.scenario = options?.scenario ?? "default";
+  }
+
+  /** 切换场景（不存在则 throw） */
+  setScenario(name: string): void {
+    if (!this.options?.scenarios || !(name in this.options.scenarios)) {
+      // "default" 场景始终存在（即使未在 scenarios 中显式定义）
+      if (name !== "default") {
+        throw new Error(`Mock: scenario "${name}" does not exist`);
+
+      }
+    }
+    this.scenario = name;
+  }
+
+  /** 获取当前场景名 */
+  getScenario(): string {
+    return this.scenario;
+  }
+
+  /** 获取全部场景名（至少含 "default"） */
+  getScenarioNames(): string[] {
+    const names = this.options?.scenarios
+      ? Object.keys(this.options.scenarios)
+      : [];
+    if (!names.includes("default")) {
+      names.unshift("default");
+    }
+    return names;
   }
 
   async execute<T>(op: {
@@ -41,15 +88,28 @@ export class MockTransport implements Transport {
   }): Promise<T> {
     const { field, variables, sessionKey, signal } = op;
 
-    // 1. 查 fieldOptions：delayMs / failRate / error
+    // 1. 解析场景级注入（场景优先，逐项覆盖）
+    const scenarioConfig = this.options?.scenarios?.[this.scenario];
+
+    // error: scenarios[scenario].fieldOptions?.[field]?.error ?? scenarios[scenario].error ?? fieldOptions?.[field]?.error
     const fieldOpt = this.options?.fieldOptions?.[field];
-    if (fieldOpt?.error) throw fieldOpt.error;
-    if (fieldOpt?.failRate !== undefined && Math.random() < fieldOpt.failRate) {
+    const scenarioFieldOpt = scenarioConfig?.fieldOptions?.[field];
+    const effError = scenarioFieldOpt?.error ?? scenarioConfig?.error ?? fieldOpt?.error;
+    if (effError) throw effError;
+
+    // failRate: scenarios[scenario].fieldOptions?.[field]?.failRate ?? fieldOptions?.[field]?.failRate
+    const effFailRate = scenarioFieldOpt?.failRate ?? fieldOpt?.failRate;
+    if (effFailRate !== undefined && Math.random() < effFailRate) {
       throw new Error(`Mock: simulated failure for "${field}"`);
     }
 
-    const delay = fieldOpt?.delayMs ?? this.options?.delayMs;
-    if (delay) await new Promise((r) => setTimeout(r, delay));
+    // delayMs: scenarios[scenario].fieldOptions?.[field]?.delayMs ?? scenarios[scenario].delayMs ?? fieldOptions?.[field]?.delayMs ?? delayMs
+    const effDelay =
+      scenarioFieldOpt?.delayMs
+      ?? scenarioConfig?.delayMs
+      ?? fieldOpt?.delayMs
+      ?? this.options?.delayMs;
+    if (effDelay) await new Promise((r) => setTimeout(r, effDelay));
 
     // 2. 查 handlers[field]
     const handler = this.handlers[field];
@@ -58,10 +118,11 @@ export class MockTransport implements Transport {
     }
 
     // 3. 调用 handler，支持 timeoutMs 超时模拟
-    const handlerPromise = handler(variables, { sessionKey, signal }) as Promise<T> | T;
+    const handlerPromise = handler(variables, { sessionKey, signal, scenario: this.scenario }) as Promise<T> | T;
 
-    const timeoutMs = fieldOpt?.timeoutMs;
-    if (timeoutMs === undefined) {
+    // timeoutMs: scenarios[scenario].fieldOptions?.[field]?.timeoutMs ?? fieldOptions?.[field]?.timeoutMs
+    const effTimeoutMs = scenarioFieldOpt?.timeoutMs ?? fieldOpt?.timeoutMs;
+    if (effTimeoutMs === undefined) {
       return handlerPromise;
     }
 
@@ -69,7 +130,7 @@ export class MockTransport implements Transport {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
         () => reject(new Error(`Mock: timeout for "${field}"`)),
-        timeoutMs,
+        effTimeoutMs,
       );
     });
 

@@ -89,6 +89,7 @@ Tkwf.configure("default", {
 | `validateMock` / `selfHealing` / `detectChange` | AI 编排基础设施：schema 校验 / 自愈重试 / 产物变更检测（不内置 LLM） |
 | `defaultSessionHandlers` | 登录链路（requestChallenge / loginByContext / loginByPassword / logout）内置 mock |
 | `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用，泛型约束 field/args/result） |
+| `createScenarioContext()` | 场景协调器：`setScenario` 联动 db 数据集 + transport 注入，一键切换默认/空态/错误态/加载态 |
 
 ---
 
@@ -157,6 +158,136 @@ AI 填充工作流：`gen-mock-handlers` 生成骨架 → Agent 填充业务意�
 
 ---
 
+## 场景切换（v1.2.0）
+
+运行时切换 mock 行为：默认态（正常数据）/ 空态（空数据）/ 错误态（注入 error）/ 加载态（长延迟）——不重启、不改代码、零业务改动。
+
+### 核心概念
+
+- **场景** = `数据视图（db 数据集）` + `注入配置（transport 注入）`，以场景名关联
+- 四种内置场景约定：`default`（正常数据 + 无注入）、`empty`（空数据）、`error`（注入 error/failRate）、`loading`（长 delayMs）
+- **消费端可自定义扩展**任意场景名（如 `"emptyLoading"` 同时设空数据 + 长延迟）
+
+### 多数据集（`createMockDb`）
+
+```typescript
+const db = createMockDb(
+  { paymentLogs: [] },                             // default 数据集
+  {
+    datasets: {
+      default: { paymentLogs: [{ id: 1, status: "ok", amount: 100 }] },
+      empty: { paymentLogs: [] },
+    },
+  },
+);
+
+db.switchDataset("empty");     // 切换到空数据
+db.getDatasetName();           // → "empty"
+db.listDatasets();             // → ["default", "empty"]
+db.reset();                    // 重置当前活跃数据集到初始快照
+db.reset("default");           // 切换到 default 并重置
+```
+
+### 场景注入（`MockTransport`）
+
+```typescript
+const transport = new MockTransport(handlers, {
+  scenarios: {
+    error: {
+      fieldOptions: {
+        paymentLogs: { error: new Error("数据库不可用") },
+      },
+    },
+    loading: { delayMs: 3000 },
+  },
+});
+
+transport.setScenario("error");     // 切换错误态
+transport.getScenario();            // → "error"
+transport.getScenarioNames();       // → ["default", "error", "loading"]
+```
+
+**注入优先级**（逐项覆盖，场景优先）：
+
+```
+error:     scenarios[scenario].fieldOptions?.[field]?.error ?? scenarios[scenario].error ?? fieldOptions?.[field]?.error
+failRate:  scenarios[scenario].fieldOptions?.[field]?.failRate ?? fieldOptions?.[field]?.failRate
+delayMs:   scenarios[scenario].fieldOptions?.[field]?.delayMs ?? scenarios[scenario].delayMs ?? fieldOptions?.[field]?.delayMs ?? delayMs
+timeoutMs: scenarios[scenario].fieldOptions?.[field]?.timeoutMs ?? fieldOptions?.[field]?.timeoutMs
+```
+
+### handler 感知场景
+
+`ctx.scenario` 可选字段，handler 内部可据此返回差异化数据：
+
+```typescript
+const handlers = {
+  paymentLogs: (vars, ctx) => {
+    if (ctx.scenario === "error") {
+      return { nodes: [], totalCount: 0, pageInfo: {} };  // 错误态返回空列表
+    }
+    return db.query("paymentLogs", vars?.where, vars?.order, { first: vars?.first });
+  },
+};
+```
+
+### 场景协调器（`createScenarioContext`）
+
+一键联动 db 数据集 + transport 注入：
+
+```typescript
+const db = createMockDb({ paymentLogs: [] }, {
+  datasets: {
+    default: { paymentLogs: [{ id: 1, status: "ok" }] },
+    empty: { paymentLogs: [] },
+  },
+});
+const transport = new MockTransport(handlers, {
+  scenarios: {
+    error: { fieldOptions: { paymentLogs: { error: new Error("boom") } } },
+    loading: { delayMs: 3000 },
+  },
+});
+
+const scenario = createScenarioContext({ db, transport });
+
+scenario.setScenario("empty");    // 一起切换：数据变空 + 注入不变
+scenario.setScenario("error");    // 数据正常 + 注入 error
+scenario.setScenario("loading");  // 数据正常 + 长延迟
+```
+
+协调器自动保证原子性：校验优先（场景名必须存在于 db 或 transport 至少一侧），切换失败时回滚已成功的一侧。
+
+### codegen 场景骨架
+
+`gen-mock-handlers` 生成的 `ts-client.mock.g.ts` 产物新增两段，供消费端 Agent 填充：
+
+```typescript
+// ── 场景数据集骨架（数据留 Agent 填充） ──
+export const scenarios = {
+  default: { paymentLogs: [] satisfies PaymentLog[], ... },
+  empty:   { paymentLogs: [] satisfies PaymentLog[], ... },
+};
+
+// ── 场景注入配置骨架 ──
+export const scenarioOverrides: Record<string, ScenarioConfig> = {
+  error:   { fieldOptions: { /* TODO: Agent 按 field 填 error / failRate */ } },
+  loading: { delayMs: 3000 },
+};
+```
+
+### 分阶段策略指南
+
+| 阶段 | 场景组合 | 说明 |
+|------|---------|------|
+| 原型 | `setScenario("default")` + 简单数据 | 快速验证 UI 交互，数据不严格但可交互 |
+| 开发 | 自定义场景：`datasets.local` + `scenarios.dev` | 本地调试数据，可叠加错误态验证异常路径 |
+| 测试 | `setScenario("empty")` / `setScenario("error")` | 确定性的空态/错误态，无需改代码切换 |
+
+场景切换 = 运行时行为，不涉及代码变更或重新生成。原型→开发→测试的过度只需切场景名，业务代码零改动。
+
+---
+
 ## 与其它类似项目的差异
 
 ### 业界现状：三块各自成熟的拼图
@@ -208,7 +339,7 @@ Mirage 证明了 mutation→query 联动是刚需，但**无人把"类型驱动�
 |------|------|------|
 | **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现 |
 | **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers`）+ AI 编排基础设施（validateMock / selfHealing / detectChange）+ mock-db 过滤桥接增强 | ✅ 已实现 |
-| **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | P3/P2：默认/空态/错误态/加载态，Storybook 友好；原型→开发→测试分阶段 |
+| **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | ✅ 已实现 |
 | **v1.3.0** | 录制回放（record-replay） | P3：真实请求 HAR 导入 → 回放，测试用真实数据而非手工 mock |
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | P4：mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
 
