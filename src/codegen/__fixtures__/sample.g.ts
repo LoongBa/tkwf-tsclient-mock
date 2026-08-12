@@ -85,6 +85,8 @@ export interface PaymentLog {
   tags?: string[];
   meta?: Record<string, string>;
   extra?: { nested: string; value: number };
+  merchantId: number;
+  merchant?: Merchant;
 }
 
 export interface Merchant {
@@ -93,6 +95,8 @@ export interface Merchant {
   balance: number;
   createdAt: string;
   status: string;
+  logIds: number[];
+  logs?: PaymentLog[];
   children?: Merchant[];
 }
 

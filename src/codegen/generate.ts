@@ -2,7 +2,7 @@ import * as path from "node:path";
 import type { ParsedDoc } from "./parse-doc.js";
 import { parseDoc, entityTypeToTableName } from "./parse-doc.js";
 import { parseServiceMethods, type ServiceMethod } from "./parse-service.js";
-import { parseDtoSchemas, extractEnumFieldNames, type DtoSchemaMap } from "./parse-dto.js";
+import { parseDtoSchemas, extractEnumFieldNames, inferDtoRelations, type DtoSchemaMap } from "./parse-dto.js";
 import * as tpl from "./templates.js";
 
 /**
@@ -70,6 +70,17 @@ export function generate(source: string, inputPath: string, outputPath: string):
   // 运行时校验骨架（v1.4.0）
   const schemaNames = Object.keys(dtoSchemas);
   lines.push(tpl.validateZodHelpers(schemaNames));
+
+  // 实体关联注册骨架（v1.8.0）—— 从 DTO 类型自动推断 registerRelation
+  const relations = inferDtoRelations(model.parsedDoc, dtoSchemas);
+  if (relations.length > 0) {
+    const relationCalls = relations.map((rel) => {
+      const table = entityTypeToTableName(rel.sourceDto);
+      const targetTable = entityTypeToTableName(rel.targetDto);
+      return `db.registerRelation("${table}", "${rel.field}", {\n    type: "${rel.type}",\n    targetTable: "${targetTable}",\n    foreignKey: "${rel.fkField}"\n  });`;
+    });
+    lines.push(tpl.relationSkeleton(relationCalls));
+  }
 
   // field handlers
   lines.push("// ── field handlers（骨架：db 操作已生成，Agent 只填业务意图） ──");

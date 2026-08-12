@@ -23,7 +23,7 @@ export function header(): string {
 export function imports(importPath: string, typeNames: string[]): string {
   const typeImports = typeNames.filter(Boolean);
   const lines: string[] = [
-    'import type { MockHandler, ScenarioConfig } from "@tkwf/tsclient-mock";',
+    'import type { MockHandler, ScenarioConfig, MockDb } from "@tkwf/tsclient-mock";',
     'import { createMockDb, defineMock } from "@tkwf/tsclient-mock";',
   ];
   if (typeImports.length > 0) {
@@ -206,6 +206,22 @@ export function validateZodHelpers(schemaNames: string[]): string {
     "",
     "// ── 运行时校验辅助（v1.4.0，动态 import，不调用不加载 zod） ──",
     funcs,
+    "",
+  ].join("\n");
+}
+
+/**
+ * 生成实体关联注册骨架（v1.8.0）。
+ * @param relationLines 已格式化的 db.registerRelation 调用字符串数组
+ */
+export function relationSkeleton(relationLines: string[]): string {
+  if (relationLines.length === 0) return "";
+  return [
+    "",
+    "// ── 实体关联注册（v1.8.0，codegen 自动推断，Agent 可按需调整 FK 字段名） ──",
+    "export function registerRelations(db: MockDb) {",
+    relationLines.map((l) => `  ${l}`).join("\n"),
+    "}",
     "",
   ].join("\n");
 }
