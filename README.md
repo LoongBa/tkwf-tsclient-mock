@@ -92,6 +92,7 @@ Tkwf.configure("default", {
 | `createScenarioContext()` | 场景协调器：`setScenario` 联动 db 数据集 + transport 注入，一键切换默认/空态/错误态/加载态 |
 | `createRecordingTransport()` | 录制回放装饰器：record/replay/passthrough 三态模式，真实请求录制 → 测试回放 |
 | `mockFieldSchemaToZod()` | 运行时契约校验：`MockFieldSchema → zod` 适配器，`validateMock` 底层基于 zod safeParse |
+| `registerRelation()` | 关联过滤嵌套：`registerRelation` 声明外键关系，`some`/`every`/`none` 关联查询 |
 
 ---
 
@@ -461,6 +462,7 @@ npm install --save-dev zod@^4
 | **v1.3.0** | 录制回放（record-replay） | ✅ 已实现 |
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | ✅ 已实现 |
 | **v1.5.0** | 查询语义增强（FilterInput 操作符扩展） | ✅ 已实现 |
+| **v1.6.0** | 关联过滤嵌套（some/every/none） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 

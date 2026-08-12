@@ -53,6 +53,18 @@ export interface FilterInput {
   [field: string]: FilterPredicate | FilterInput | readonly FilterInput[] | undefined;
 }
 
+/** 关系类型（v1.6.0 关联过滤） */
+export type RelationType = "hasMany" | "belongsTo";
+
+/** 关系定义（v1.6.0 关联过滤） */
+export interface RelationDef {
+  type: RelationType;
+  /** 关联表名 */
+  targetTable: string;
+  /** 外键字段名（当前表中的字段名） */
+  foreignKey: string;
+}
+
 /** 排序声明：{ field: "asc" | "desc" | "ASC" | "DESC" }（大小写归一） */
 export type SortInput = Record<string, "asc" | "desc" | "ASC" | "DESC">;
 
@@ -104,6 +116,27 @@ export interface MockDb {
   getDatasetName(): string;
   /** 列出所有可用数据集名称（含默认的 "default"） */
   listDatasets(): string[];
+
+  /**
+   * 注册实体关系（v1.6.0）。
+   *
+   * @param table 当前表名
+   * @param field 关联字段名（filter 中使用的键名）
+   * @param relation 关系定义
+   *
+   * @example
+   * db.registerRelation("paymentLogs", "merchant", {
+   *   type: "belongsTo",
+   *   targetTable: "merchants",
+   *   foreignKey: "merchantId",
+   * });
+   * db.registerRelation("merchants", "logs", {
+   *   type: "hasMany",
+   *   targetTable: "paymentLogs",
+   *   foreignKey: "merchantId",
+   * });
+   */
+  registerRelation(table: string, field: string, relation: RelationDef): void;
 }
 
 // ─── 混合类型比较 ───────────────────────────────────────────
@@ -179,73 +212,6 @@ const OPERATOR_EVALUATORS: Record<OperatorName, OperatorEvaluator> = {
   },
 };
 
-// ─── 过滤引擎 ───────────────────────────────────────────────
-
-const MAX_FILTER_DEPTH = 5;
-
-/**
- * 递归匹配行：
- * 1. 遍历 filter 上所有非 and/or 的键 → 视为字段值，从统一操作符表逐键评估
- * 2. 再评估 and（every）/or（some）子树（兼容数组与 OperationFilterInput 单对象两种形态）
- */
-function matchRow(row: Record<string, unknown>, filter: Record<string, unknown>, depth: number): boolean {
-  if (depth > MAX_FILTER_DEPTH) {
-    throw new Error("Mock: filter nesting too deep");
-  }
-
-  const filterKeys = Object.keys(filter);
-
-  // 阶段 1：叶子谓词（隐式 AND）——统一操作符表评估
-  for (const key of filterKeys) {
-    if (key === "and" || key === "or") continue;
-    const predicate = filter[key];
-    if (!predicate || typeof predicate !== "object" || Array.isArray(predicate)) continue;
-
-    const rowValue = row[key];
-    const predObj = predicate as Record<string, unknown>;
-
-    // null 门控（v1.5.0）：字段为 null/undefined 时，仅 isNull 操作符生效
-    if (rowValue === null || rowValue === undefined) {
-      const isNullOp = predObj["isNull"];
-      if (isNullOp !== undefined) return isNullOp === true;
-      return false; // 其他操作符对 null 均返回 false
-    }
-
-    // mode 提取（v1.5.0）：同字段的 mode 修饰符
-    const mode = predObj["mode"] as QueryMode | undefined;
-    const STRING_OPS = new Set(["contains", "ncontains", "startsWith", "nstartsWith", "endsWith", "nendsWith"]);
-
-    for (const [op, operand] of Object.entries(predObj)) {
-      const evaluate = OPERATOR_EVALUATORS[op as OperatorName];
-      if (!evaluate) continue; // 未知键（如嵌套对象字段、mode 修饰符）→ 忽略
-
-      // mode 归一化：对 6 个字符串模式操作符，不区分大小写比较
-      let effectiveRv: unknown = rowValue;
-      let effectiveOp: unknown = operand;
-      if (mode === "insensitive" && STRING_OPS.has(op)) {
-        effectiveRv = String(rowValue).toLowerCase();
-        effectiveOp = String(operand).toLowerCase();
-      }
-      if (!evaluate(effectiveRv, effectiveOp)) return false;
-    }
-  }
-
-  // 阶段 2：and/or 子树（兼容数组与 OperationFilterInput 单对象两种形态）
-  const andVal = filter["and"];
-  if (andVal !== undefined && andVal !== null) {
-    const andNodes = Array.isArray(andVal) ? andVal : [andVal];
-    if (!andNodes.every((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1))) return false;
-  }
-
-  const orVal = filter["or"];
-  if (orVal !== undefined && orVal !== null) {
-    const orNodes = Array.isArray(orVal) ? orVal : [orVal];
-    if (!orNodes.some((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1))) return false;
-  }
-
-  return true;
-}
-
 // ─── 排序引擎 ───────────────────────────────────────────────
 
 function sortRows(rows: Record<string, unknown>[], sort: SortInput[]): Record<string, unknown>[] {
@@ -320,6 +286,133 @@ export function createMockDb(
   const fieldTableMap = new Map<string, string>();
   const datasetSnapshots = new Map<string, Map<string, Map<string | number, Record<string, unknown>>>>();
   let currentDatasetName = "default";
+  // v1.6.0：关系注册表（table → field → RelationDef）
+  const relationRegistry = new Map<string, Map<string, RelationDef>>();
+
+  // ─── 过滤引擎（移入闭包内以访问 tables 和 relationRegistry，v1.6.0 🔴 B1）───
+
+  const MAX_FILTER_DEPTH = 5;
+
+  function evaluateRelationFilter(
+    row: Record<string, unknown>,
+    field: string,
+    predicate: Record<string, unknown>,
+    table: string,
+    depth: number,
+  ): boolean {
+    const tableRelations = relationRegistry.get(table);
+    const relation = tableRelations?.get(field);
+    if (!relation) return true;
+
+    const fkValue = row[relation.foreignKey];
+    let relatedRows: Record<string, unknown>[];
+
+    if (relation.type === "hasMany") {
+      const fkArray = Array.isArray(fkValue) ? (fkValue as (string | number)[]) : [];
+      const targetTable = tables.get(relation.targetTable);
+      if (!targetTable) return false;
+      relatedRows = fkArray
+        .map((id) => targetTable.get(id))
+        .filter((r): r is Record<string, unknown> => r !== undefined);
+    } else {
+      const fkId = fkValue as string | number | undefined;
+      if (fkId === undefined || fkId === null) {
+        relatedRows = [];
+      } else {
+        const targetTable = tables.get(relation.targetTable);
+        const found = targetTable?.get(fkId);
+        relatedRows = found ? [found] : [];
+      }
+    }
+
+    let op: "some" | "every" | "none" | undefined;
+    let subFilter: Record<string, unknown> | undefined;
+    if ("some" in predicate) { op = "some"; subFilter = predicate.some as Record<string, unknown>; }
+    else if ("every" in predicate) { op = "every"; subFilter = predicate.every as Record<string, unknown>; }
+    else if ("none" in predicate) { op = "none"; subFilter = predicate.none as Record<string, unknown>; }
+    if (!op || !subFilter) return true;
+
+    if (relatedRows.length === 0) {
+      switch (op) {
+        case "some":  return false;
+        case "every": return true;
+        case "none":  return true;
+      }
+    }
+
+    switch (op) {
+      case "some":
+        return relatedRows.some((r) => matchRow(r, subFilter, depth + 1, relation.targetTable));
+      case "every":
+        return relatedRows.every((r) => matchRow(r, subFilter, depth + 1, relation.targetTable));
+      case "none":
+        return !relatedRows.some((r) => matchRow(r, subFilter, depth + 1, relation.targetTable));
+    }
+  }
+
+  function matchRow(row: Record<string, unknown>, filter: Record<string, unknown>, depth: number, table: string): boolean {
+    if (depth > MAX_FILTER_DEPTH) {
+      throw new Error("Mock: filter nesting too deep");
+    }
+
+    const filterKeys = Object.keys(filter);
+
+    // 阶段 1：叶子谓词 + 关联过滤（隐式 AND）
+    for (const key of filterKeys) {
+      if (key === "and" || key === "or") continue;
+      const predicate = filter[key];
+      if (!predicate || typeof predicate !== "object" || Array.isArray(predicate)) continue;
+
+      const predObj = predicate as Record<string, unknown>;
+
+      // 阶段 1.5（v1.6.0）：关联过滤（some/every/none）
+      if ("some" in predObj || "every" in predObj || "none" in predObj) {
+        if (!evaluateRelationFilter(row, key, predObj, table, depth)) return false;
+        continue;
+      }
+
+      const rowValue = row[key];
+
+      // null 门控（v1.5.0）
+      if (rowValue === null || rowValue === undefined) {
+        const isNullOp = predObj["isNull"];
+        if (isNullOp !== undefined) return isNullOp === true;
+        return false;
+      }
+
+      // mode 提取（v1.5.0）
+      const mode = predObj["mode"] as QueryMode | undefined;
+      const STRING_OPS = new Set(["contains", "ncontains", "startsWith", "nstartsWith", "endsWith", "nendsWith"]);
+
+      for (const [op, operand] of Object.entries(predObj)) {
+        const evaluate = OPERATOR_EVALUATORS[op as OperatorName];
+        if (!evaluate) continue;
+
+        let effectiveRv: unknown = rowValue;
+        let effectiveOp: unknown = operand;
+        if (mode === "insensitive" && STRING_OPS.has(op)) {
+          effectiveRv = String(rowValue).toLowerCase();
+          effectiveOp = String(operand).toLowerCase();
+        }
+        if (!evaluate(effectiveRv, effectiveOp)) return false;
+      }
+    }
+
+    // 阶段 2：and/or 子树
+    const andVal = filter["and"];
+    if (andVal !== undefined && andVal !== null) {
+      const andNodes = Array.isArray(andVal) ? andVal : [andVal];
+      if (!andNodes.every((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1, table))) return false;
+    }
+
+    const orVal = filter["or"];
+    if (orVal !== undefined && orVal !== null) {
+      const orNodes = Array.isArray(orVal) ? orVal : [orVal];
+      if (!orNodes.some((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1, table))) return false;
+    }
+
+    return true;
+  }
 
   // 从 DatasetSeed 构建表 Map
   function buildTablesFromSeed(seed: DatasetSeed): Map<string, Map<string | number, Record<string, unknown>>> {
@@ -391,7 +484,7 @@ export function createMockDb(
 
     // 过滤
     if (filter && typeof filter === "object") {
-      result = result.filter((row) => matchRow(row, filter as Record<string, unknown>, 0));
+      result = result.filter((row) => matchRow(row, filter as Record<string, unknown>, 0, table));
     }
 
     // 排序
@@ -424,6 +517,15 @@ export function createMockDb(
 
     registerMutation(field: string, table: string, _op: string): void {
       fieldTableMap.set(field, table);
+    },
+
+    registerRelation(table: string, field: string, relation: RelationDef): void {
+      let tableRelations = relationRegistry.get(table);
+      if (!tableRelations) {
+        tableRelations = new Map();
+        relationRegistry.set(table, tableRelations);
+      }
+      tableRelations.set(field, relation);
     },
 
     query<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {

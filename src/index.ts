@@ -20,6 +20,8 @@ export type {
   FilterPredicate,
   FilterInput,
   QueryMode,
+  RelationDef,
+  RelationType,
   SortInput,
   CursorPage,
   OffsetPage,

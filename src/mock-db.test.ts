@@ -440,6 +440,124 @@ describe("createMockDb — v1.5.0 新增操作符", () => {
   });
 });
 
+describe("createMockDb — v1.6.0 关联过滤嵌套", () => {
+  interface Merchant {
+    id: number;
+    name: string;
+    rating: number;
+  }
+
+  const merchantSeed: Merchant[] = [
+    { id: 1, name: "LoongTech", rating: 5 },
+    { id: 2, name: "AlphaCorp", rating: 3 },
+    { id: 3, name: "BetaInc", rating: 4 },
+  ];
+
+  function makeRelationDb() {
+    const db = createMockDb({
+      logs: seed,
+      merchants: merchantSeed,
+    });
+    // 注册关系：logs.merchantId → merchants.id（belongsTo）
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo",
+      targetTable: "merchants",
+      foreignKey: "merchantId",
+    });
+    // 注册关系：merchants.logIds → logs.id（hasMany，foreignKey 为当前行 ID 数组）
+    db.registerRelation("merchants", "logs", {
+      type: "hasMany",
+      targetTable: "logs",
+      foreignKey: "logIds",
+    });
+    // 给部分日志设置 merchantId（belongsTo 方向）
+    db.insert<Record<string, unknown>>("logs", { id: 100, status: "SUCCESS", amount: 500, createdAt: new Date(), merchantId: 1 } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 101, status: "FAILED", amount: 50, createdAt: new Date(), merchantId: 2 } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 102, status: "SUCCESS", amount: 300, createdAt: new Date(), merchantId: 1 } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 103, status: "PENDING", amount: 100, createdAt: new Date(), merchantId: 3 } as Record<string, unknown>);
+    // 给 merchants 设置 logIds（hasMany 方向，ID 数组）
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "LoongTech", rating: 5, logIds: [100, 102] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("merchants", { id: 2, name: "AlphaCorp", rating: 3, logIds: [101] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("merchants", { id: 3, name: "BetaInc", rating: 4, logIds: [103] } as Record<string, unknown>);
+    return db;
+  }
+
+  it("hasMany some：至少一条关联行匹配", () => {
+    const db = makeRelationDb();
+    // 查询 merchants：至少有一条 logs rating > 4
+    const result = db.query<Merchant>("merchants", { logs: { some: { status: { eq: "FAILED" } } } });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("AlphaCorp");
+  });
+
+  it("hasMany every：所有关联行匹配", () => {
+    const db = makeRelationDb();
+    // 查询 merchants：所有 logs 都是 SUCCESS
+    const result = db.query<Merchant>("merchants", { logs: { every: { status: { eq: "SUCCESS" } } } });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("LoongTech");
+  });
+
+  it("hasMany none：没有关联行匹配", () => {
+    const db = makeRelationDb();
+    // 查询 merchants：没有 logs 是 FAILED
+    const result = db.query<Merchant>("merchants", { logs: { none: { status: { eq: "FAILED" } } } });
+    expect(result).toHaveLength(2); // LoongTech, BetaInc
+  });
+
+  it("hasMany some 空关联 → false", () => {
+    const db = makeRelationDb();
+    // 插入一条无关联日志的 merchant
+    db.insert<Merchant>("merchants", { id: 99, name: "EmptyMerchant", rating: 1 });
+    const result = db.query<Merchant>("merchants", { logs: { some: { amount: { gt: 0 } } } });
+    // EmptyMerchant 无关联日志，some 返回 false → 不包含
+    const names = result.map((r) => r.name);
+    expect(names).not.toContain("EmptyMerchant");
+  });
+
+  it("hasMany every 空关联 → true（空真）", () => {
+    const db = makeRelationDb();
+    db.insert<Merchant>("merchants", { id: 99, name: "EmptyMerchant", rating: 1 });
+    // every 对空数组返回 true → EmptyMerchant 被包含
+    const result = db.query<Merchant>("merchants", { logs: { every: { amount: { gt: 999999 } } } });
+    const names = result.map((r) => r.name);
+    expect(names).toContain("EmptyMerchant");
+  });
+
+  it("belongsTo some：单关联行匹配", () => {
+    const db = makeRelationDb();
+    // 查询 logs：关联 merchant rating > 4
+    const result = db.query<Record<string, unknown>>("logs", { merchant: { some: { rating: { gt: 4 } } } });
+    expect(result).toHaveLength(2); // merchantId=1 的两条
+  });
+
+  it("belongsTo 外键为 null → 不匹配", () => {
+    const db = makeRelationDb();
+    // 原有 5 条日志无 merchantId，加上 4 条有 merchantId 的 = 9 条
+    // 查询有关联 merchant 的日志
+    const result = db.query<Record<string, unknown>>("logs", { merchant: { some: { rating: { gt: 0 } } } });
+    expect(result).toHaveLength(4); // 只有有 merchantId 的 4 条
+  });
+
+  it("未注册关系字段 → 跳过（向后兼容）", () => {
+    const db = makeRelationDb();
+    // 对未注册关系的字段使用 some → 静默跳过，不影响结果
+    const result = db.query<Merchant>("merchants", { unknownField: { some: { x: { eq: 1 } } } });
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("嵌套多级关联（some → some）", () => {
+    const db = makeRelationDb();
+    // 先注册反向关系已由 makeRelationDb 完成
+    // 查询 merchants：logs 中至少有一条的 merchant 是 LoongTech
+    // 这是自指遍历，但 depth=5 阻止无限递归
+    const result = db.query<Merchant>("merchants", { logs: { some: { merchant: { some: { name: { eq: "LoongTech" } } } } } });
+    // merchantId=1 的有 2 条日志，它们关联到 LoongTech
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("LoongTech");
+  });
+});
+
 describe("createMockDb — queryOne", () => {
   it("queryOne 返回第一条匹配，无匹配返回 undefined", () => {
     const db = makeDb();
