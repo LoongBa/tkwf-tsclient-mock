@@ -35,3 +35,21 @@ export type { ScenarioContext, ScenarioConfig, FieldOption, BuiltinScenario } fr
 
 export { validateMock, selfHealing, detectChange, sha256, configureSidecar } from "./ai/index.js";
 export type { ValidateResult, SidecarStore } from "./ai/index.js";
+
+export {
+  createRecordingTransport,
+  configureRecordingStore,
+  normalizeTimestamps,
+  normalizeUuids,
+  MemoryRecordingStore,
+  MockRecordingError,
+} from "./record-replay.js";
+export type {
+  Recording,
+  RecordingStore,
+  RecordedEntry,
+  RecordingMode,
+  RecordingTransportOptions,
+} from "./record-replay.js";
+
+export { FileRecordingStore } from "./file-recording-store.js";

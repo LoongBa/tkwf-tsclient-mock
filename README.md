@@ -90,6 +90,7 @@ Tkwf.configure("default", {
 | `defaultSessionHandlers` | 登录链路（requestChallenge / loginByContext / loginByPassword / logout）内置 mock |
 | `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用，泛型约束 field/args/result） |
 | `createScenarioContext()` | 场景协调器：`setScenario` 联动 db 数据集 + transport 注入，一键切换默认/空态/错误态/加载态 |
+| `createRecordingTransport()` | 录制回放装饰器：record/replay/passthrough 三态模式，真实请求录制 → 测试回放 |
 
 ---
 
@@ -325,22 +326,91 @@ Mirage 证明了 mutation→query 联动是刚需，但**无人把"类型驱动�
 
 - ❌ **不适用**：需要真实 HTTP 语义（CORS/中间件/鉴权链路）的场景
 - ❌ **查询语义子集**：FilterInput 覆盖常用操作符，非常规 GraphQL 过滤需自定义 handler
-- ❌ **无录制回放**：真实请求的 HAR 录制导入（Pact/HAR）为未来方向
 - ❌ **运行时契约校验缺位**：TS 类型 → zod 的运行时校验（P4）未实现，mock 数据绕过真实 schema 校验
+
+---
+
+## 录制回放（v1.3.0）
+
+真实后端的请求/响应录制 → 测试时确定性回放，测试用真实数据而非手工 mock。
+
+### 三态模式
+
+| 模式 | 行为 |
+|------|------|
+| `record` | 走真实 Transport，记录请求/响应（含错误） |
+| `replay` | 从录制数据匹配请求，返回录制响应（不依赖后端） |
+| `passthrough` | 直通真实 Transport，不记录 |
+
+### 快速开始
+
+```typescript
+import { createRecordingTransport, FileRecordingStore, normalizeTimestamps } from "@tkwf/tsclient-mock";
+
+// 1. 录制：真实后端 → 文件
+const recordTransport = createRecordingTransport(realTransport, {
+  mode: "record",
+  recordingName: "payment-flow",
+  store: new FileRecordingStore("./recordings"),
+  normalizers: {
+    normalizeResult: (result) => normalizeTimestamps(normalizeTimestamps(result)),  // 时间戳归一化
+  },
+});
+const store = new FileRecordingStore("./recordings");
+store.start("payment-flow");
+await recordTransport.execute({ field: "paymentLogs", type: "query", variables: { first: 10 } });
+store.stop();
+
+// 2. 回放：测试时从文件加载，确定性返回
+const replayTransport = createRecordingTransport(mockTransport, {
+  mode: "replay",
+  recordingName: "payment-flow",
+  store: new FileRecordingStore("./recordings"),
+});
+const result = await replayTransport.execute({ field: "paymentLogs", type: "query", variables: { first: 10 } });
+// result = 录制时的真实响应
+```
+
+### 匹配与消费
+
+- **匹配键**：`field + type + 归一化 variables`（variables 键排序、`undefined`→`{}`）
+- **有序（默认）**：FIFO 消费录制条目，`maxUsageCount` 控制单条可消费次数
+- **无序（`order: false`）**：polling 场景，取第一个可消费条目（确定性）
+- **未命中**：触发 `onMiss` 回调 + 抛错
+- **错误条目**：回放时抛 `MockRecordingError`（携带 `source`/`errorCode`）
+
+### 归一化
+
+非确定性字段（时间戳/UUID）录制时替换为固定占位符，回放可重复：
+
+```typescript
+import { normalizeTimestamps, normalizeUuids } from "@tkwf/tsclient-mock";
+
+normalizeTimestamps("2026-05-01T12:00:00.000Z");  // → "2026-01-01T00:00:00.000Z"
+normalizeUuids("550e8400-e29b-41d4-a716-446655440000");  // → "00000000-0000-0000-0000-000000000000"
+```
+
+> 提示：归一化器默认用于 `normalizeResult`（避免误伤 variables 中的合法业务 ID/时间戳）。
+
+### 存储
+
+- **内存**（默认）：`MemoryRecordingStore`，进程内
+- **文件**：`FileRecordingStore(dir)`，`<dir>/<name>.json` 每文件一录制
+- **自定义**：实现 `RecordingStore` 接口 + `configureRecordingStore()` 注入（复用 `configureSidecar` 模式）
 
 ---
 
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.1.0 内容。
+> 当前实现 = v1.3.0 内容。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
 | **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现 |
 | **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers`）+ AI 编排基础设施（validateMock / selfHealing / detectChange）+ mock-db 过滤桥接增强 | ✅ 已实现 |
 | **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | ✅ 已实现 |
-| **v1.3.0** | 录制回放（record-replay） | P3：真实请求 HAR 导入 → 回放，测试用真实数据而非手工 mock |
+| **v1.3.0** | 录制回放（record-replay） | ✅ 已实现 |
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | P4：mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
