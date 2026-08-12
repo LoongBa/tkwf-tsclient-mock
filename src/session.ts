@@ -1,4 +1,4 @@
-import type { MockHandler } from "./mock-transport";
+import type { MockHandler } from "./mock-transport.js";
 
 /**
  * 内置默认会话处理器。

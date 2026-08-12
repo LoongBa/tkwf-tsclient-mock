@@ -273,3 +273,123 @@ describe("createMockDb — 状态同步 / reset / 注册", () => {
     expect(db.query<PaymentLog>("logs", { id: { eq: 10 } })).toHaveLength(1);
   });
 });
+
+describe("createMockDb — OperationFilterInput 家族兼容", () => {
+  it("反向操作符 ngt/ngte/nlt/nlte 语义", () => {
+    const db = makeDb();
+    // ngt = not > = <= 100 → ids 1,2,4 (amounts 100,50,75)
+    expect(db.query<PaymentLog>("logs", { amount: { ngt: 100 } }).map((r) => r.id).sort()).toEqual([1, 2, 4]);
+    // ngte = not >= = < 100 → ids 2,4 (50,75)
+    expect(db.query<PaymentLog>("logs", { amount: { ngte: 100 } }).map((r) => r.id).sort()).toEqual([2, 4]);
+    // nlt = not < = >= 100 → ids 1,3,5 (100,200,150)
+    expect(db.query<PaymentLog>("logs", { amount: { nlt: 100 } }).map((r) => r.id).sort()).toEqual([1, 3, 5]);
+    // nlte = not <= = > 100 → ids 3,5 (200,150)
+    expect(db.query<PaymentLog>("logs", { amount: { nlte: 100 } }).map((r) => r.id).sort()).toEqual([3, 5]);
+  });
+
+  it("字符串操作符 startsWith/endsWith/ncontains/nstartsWith/nendsWith", () => {
+    const db = makeDb();
+    // startsWith "SUC" → SUCCESS x3
+    expect(db.query<PaymentLog>("logs", { status: { startsWith: "SUC" } })).toHaveLength(3);
+    // endsWith "SS" → SUCCESS x3
+    expect(db.query<PaymentLog>("logs", { status: { endsWith: "SS" } })).toHaveLength(3);
+    // ncontains "SUC" → FAILED, PROCESSING
+    expect(db.query<PaymentLog>("logs", { status: { ncontains: "SUC" } }).map((r) => r.id).sort()).toEqual([2, 3]);
+    // nstartsWith "S" → FAILED, PROCESSING
+    expect(db.query<PaymentLog>("logs", { status: { nstartsWith: "S" } }).map((r) => r.id).sort()).toEqual([2, 3]);
+    // nendsWith "SS" → FAILED, PROCESSING
+    expect(db.query<PaymentLog>("logs", { status: { nendsWith: "SS" } }).map((r) => r.id).sort()).toEqual([2, 3]);
+  });
+
+  it("isTrue / isFalse 布尔操作符", () => {
+    const db = createMockDb({
+      flags: [
+        { id: 1, active: true },
+        { id: 2, active: false },
+        { id: 3, active: true },
+      ],
+    });
+    expect(db.query("flags", { active: { isTrue: true } })).toHaveLength(2);
+    expect(db.query("flags", { active: { isFalse: true } })).toHaveLength(1);
+    // isTrue: false → 条件不生效（全部通过），isFalse: false 同理
+    expect(db.query("flags", { active: { isTrue: false } })).toHaveLength(3);
+    expect(db.query("flags", { active: { isFalse: false } })).toHaveLength(3);
+  });
+
+  it("同一字段多操作符 AND 组合", () => {
+    const db = makeDb();
+    // amount >= 100 且 amount < 200 → ids 1 (100), 5 (150)
+    const rows = db.query<PaymentLog>("logs", { amount: { gte: 100, lt: 200 } });
+    expect(rows.map((r) => r.id).sort()).toEqual([1, 5]);
+  });
+
+  it("OperationFilterInput 与自有 FilterInput 两种格式共存", () => {
+    const db = makeDb();
+    // 自有格式（正向操作符）
+    expect(db.query<PaymentLog>("logs", { amount: { gt: 100 } })).toHaveLength(2);
+    // OperationFilterInput 格式（反向操作符）
+    expect(db.query<PaymentLog>("logs", { amount: { ngt: 100 } })).toHaveLength(3);
+    // 同一字段混合正向 + 反向操作符：gte(>=100) 且 lte(<=100) = 恰好 100
+    expect(db.query<PaymentLog>("logs", { amount: { gte: 100, lte: 100 } })).toHaveLength(1); // =100
+  });
+
+  it("OperationFilterInput and/or 单对象子树", () => {
+    const db = makeDb();
+    // and 为单对象（非数组）
+    const rows = db.query<PaymentLog>("logs", {
+      and: { status: { eq: "SUCCESS" }, amount: { gte: 100 } },
+    });
+    expect(rows.map((r) => r.id).sort()).toEqual([1, 5]);
+
+    // or 为单对象
+    const rows2 = db.query<PaymentLog>("logs", { or: { amount: { gt: 150 } } });
+    expect(rows2.map((r) => r.id)).toEqual([3]);
+  });
+
+  it("深度限制在 OperationFilterInput 单对象格式下仍生效", () => {
+    const db = makeDb();
+    // 6 层 and 单对象嵌套 → 抛错
+    let filter: Record<string, unknown> = { status: { eq: "SUCCESS" } };
+    for (let i = 0; i < 6; i++) {
+      filter = { and: filter };
+    }
+    expect(() => db.query("logs", filter)).toThrow("Mock: filter nesting too deep");
+
+    // 恰好 5 层 → 合法
+    let ok: Record<string, unknown> = { status: { eq: "SUCCESS" } };
+    for (let i = 0; i < 5; i++) {
+      ok = { and: ok };
+    }
+    expect(db.query<PaymentLog>("logs", ok)).toHaveLength(3);
+  });
+});
+
+describe("createMockDb — queryOne", () => {
+  it("queryOne 返回第一条匹配，无匹配返回 undefined", () => {
+    const db = makeDb();
+    // 返回第一条匹配
+    const row = db.queryOne<PaymentLog>("logs", { status: { eq: "SUCCESS" } });
+    expect(row?.id).toBe(1);
+
+    // 无过滤 → 第一条
+    expect(db.queryOne<PaymentLog>("logs")?.id).toBe(1);
+
+    // 无匹配 → undefined
+    expect(db.queryOne("logs", { status: { eq: "NOPE" } })).toBeUndefined();
+  });
+});
+
+describe("createMockDb — 排序大小写归一", () => {
+  it("SortInput 接受 ASC/DESC 大写并归一", () => {
+    const db = makeDb();
+    const asc = db.query<PaymentLog>("logs", undefined, [{ amount: "ASC" }]);
+    expect(asc.map((r) => r.amount)).toEqual([50, 75, 100, 150, 200]);
+
+    const desc = db.query<PaymentLog>("logs", undefined, [{ amount: "DESC" }]);
+    expect(desc.map((r) => r.amount)).toEqual([200, 150, 100, 75, 50]);
+
+    // 小写仍正常工作
+    const ascLower = db.query<PaymentLog>("logs", undefined, [{ amount: "asc" }]);
+    expect(ascLower.map((r) => r.amount)).toEqual([50, 75, 100, 150, 200]);
+  });
+});

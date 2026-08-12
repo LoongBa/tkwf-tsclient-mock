@@ -6,13 +6,13 @@
 // defaultSessionHandlers — 登录链路（requestChallenge/loginByContext/loginByPassword/logout）内置 handler
 // defineMock         — 类型化 handler 定义辅助
 
-export { MockTransport } from "./mock-transport";
-export type { MockHandler, MockTransportOptions } from "./mock-transport";
+export { MockTransport } from "./mock-transport.js";
+export type { MockHandler, MockTransportOptions } from "./mock-transport.js";
 
-export { createMockFactory } from "./factory";
-export type { MockFactory, MockFactoryOptions, MockFieldSchema } from "./factory";
+export { createMockFactory } from "./factory.js";
+export type { MockFactory, MockFactoryOptions, MockFieldSchema } from "./factory.js";
 
-export { createMockDb, encodeCursor, decodeCursor } from "./mock-db";
+export { createMockDb, encodeCursor, decodeCursor } from "./mock-db.js";
 export type {
   MockDb,
   DatasetSeed,
@@ -22,8 +22,12 @@ export type {
   CursorPage,
   OffsetPage,
   PageInput,
-} from "./mock-db";
+} from "./mock-db.js";
 
-export { defaultSessionHandlers } from "./session";
+export { defaultSessionHandlers } from "./session.js";
 
-export { defineMock } from "./define-mock";
+export { defineMock } from "./define-mock.js";
+export type { MockFieldContract } from "./define-mock.js";
+
+export { validateMock, selfHealing, detectChange, sha256, configureSidecar } from "./ai/index.js";
+export type { ValidateResult, SidecarStore } from "./ai/index.js";

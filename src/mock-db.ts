@@ -2,30 +2,45 @@ export type DatasetSeed = Record<string, Record<string, unknown>[]>;
 
 /**
  * 单字段谓词：eq/neq/contains/gt/gte/lt/lte/in/nin
+ * + OperationFilterInput 家族反向操作符（ngt/ngte/nlt/nlte/ncontains/nstartsWith/nendsWith/isTrue/isFalse）
  */
 export interface FilterPredicate {
   eq?: unknown;
   neq?: unknown;
-  contains?: string;
   gt?: unknown;
   gte?: unknown;
   lt?: unknown;
   lte?: unknown;
+  ngt?: unknown;
+  ngte?: unknown;
+  nlt?: unknown;
+  nlte?: unknown;
   in?: readonly unknown[];
   nin?: readonly unknown[];
+  contains?: string;
+  ncontains?: string;
+  startsWith?: string;
+  nstartsWith?: string;
+  endsWith?: string;
+  nendsWith?: string;
+  isTrue?: boolean;
+  isFalse?: boolean;
 }
 
 /**
  * 递归过滤输入：字段名→谓词 + and/or 子树
+ * 兼容两种格式：
+ * 1. 自有格式：and/or 为数组，字段值为 FilterPredicate
+ * 2. OperationFilterInput 家族：and/or 为单对象，字段值为操作符对象族
  */
 export interface FilterInput {
-  and?: readonly FilterInput[];
-  or?: readonly FilterInput[];
-  [field: string]: FilterPredicate | readonly FilterInput[] | undefined;
+  and?: FilterInput | readonly FilterInput[];
+  or?: FilterInput | readonly FilterInput[];
+  [field: string]: FilterPredicate | FilterInput | readonly FilterInput[] | undefined;
 }
 
-/** 排序声明：{ field: "asc" | "desc" } */
-export type SortInput = Record<string, "asc" | "desc">;
+/** 排序声明：{ field: "asc" | "desc" | "ASC" | "DESC" }（大小写归一） */
+export type SortInput = Record<string, "asc" | "desc" | "ASC" | "DESC">;
 
 /** 游标分页参数 */
 export interface CursorPage {
@@ -53,6 +68,8 @@ export interface MockDb {
 
   /** 分页/列表语义：解析 where/orderBy/page 参数 */
   query<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[];
+  /** 单条查询：query(table, filter)[0] */
+  queryOne<T>(table: string, filter?: unknown): T | undefined;
   /** 直接操作 */
   insert<T>(table: string, row: T): T;
   update<T>(table: string, id: string | number, patch: Partial<T>): T | undefined;
@@ -72,14 +89,55 @@ function compareValues(a: unknown, b: unknown): number {
   return String(a).localeCompare(String(b));
 }
 
+// ─── OperationFilterInput 家族统一操作符表 ─────────────────
+
+type OperatorName =
+  | "eq" | "neq"
+  | "gt" | "gte" | "lt" | "lte"
+  | "ngt" | "ngte" | "nlt" | "nlte"
+  | "in" | "nin"
+  | "contains" | "ncontains"
+  | "startsWith" | "nstartsWith"
+  | "endsWith" | "nendsWith"
+  | "isTrue" | "isFalse";
+
+type OperatorEvaluator = (rowValue: unknown, operand: unknown) => boolean;
+
+/** 统一操作符表：既有 eq/neq/contains 与 OperationFilterInput 反向操作符共用 */
+const OPERATOR_EVALUATORS: Record<OperatorName, OperatorEvaluator> = {
+  eq: (rv, op) => compareValues(rv, op) === 0,
+  neq: (rv, op) => compareValues(rv, op) !== 0,
+  gt: (rv, op) => compareValues(rv, op) > 0,
+  gte: (rv, op) => compareValues(rv, op) >= 0,
+  lt: (rv, op) => compareValues(rv, op) < 0,
+  lte: (rv, op) => compareValues(rv, op) <= 0,
+  // 反向：ngt = not greater than（<=），ngte = not >=（<）
+  ngt: (rv, op) => compareValues(rv, op) <= 0,
+  ngte: (rv, op) => compareValues(rv, op) < 0,
+  // 反向：nlt = not <（>=），nlte = not <=（>）
+  nlt: (rv, op) => compareValues(rv, op) >= 0,
+  nlte: (rv, op) => compareValues(rv, op) > 0,
+  in: (rv, op) => Array.isArray(op) && (op as readonly unknown[]).some((v) => compareValues(rv, v) === 0),
+  nin: (rv, op) => Array.isArray(op) && !(op as readonly unknown[]).some((v) => compareValues(rv, v) === 0),
+  contains: (rv, op) => String(rv).includes(String(op)),
+  ncontains: (rv, op) => !String(rv).includes(String(op)),
+  startsWith: (rv, op) => String(rv).startsWith(String(op)),
+  nstartsWith: (rv, op) => !String(rv).startsWith(String(op)),
+  endsWith: (rv, op) => String(rv).endsWith(String(op)),
+  nendsWith: (rv, op) => !String(rv).endsWith(String(op)),
+  // isTrue/isFalse：operand=true 时激活过滤（值 === true / 值 === false）；operand=false 时条件不生效
+  isTrue: (rv, op) => (op === true ? rv === true : true),
+  isFalse: (rv, op) => (op === true ? rv === false : true),
+};
+
 // ─── 过滤引擎 ───────────────────────────────────────────────
 
 const MAX_FILTER_DEPTH = 5;
 
 /**
  * 递归匹配行：
- * 1. 遍历 filter 上所有非 and/or 的键 → 视为字段名，值视为谓词 → 逐字段检查
- * 2. 再评估 and（every）/or（some）子树
+ * 1. 遍历 filter 上所有非 and/or 的键 → 视为字段值，从统一操作符表逐键评估
+ * 2. 再评估 and（every）/or（some）子树（兼容数组与 OperationFilterInput 单对象两种形态）
  */
 function matchRow(row: Record<string, unknown>, filter: Record<string, unknown>, depth: number): boolean {
   if (depth > MAX_FILTER_DEPTH) {
@@ -88,62 +146,32 @@ function matchRow(row: Record<string, unknown>, filter: Record<string, unknown>,
 
   const filterKeys = Object.keys(filter);
 
-  // 阶段 1：叶子谓词（隐式 AND）
+  // 阶段 1：叶子谓词（隐式 AND）——统一操作符表评估
   for (const key of filterKeys) {
     if (key === "and" || key === "or") continue;
-    const predicate = filter[key] as Record<string, unknown> | undefined;
-    if (!predicate || typeof predicate !== "object") continue;
+    const predicate = filter[key];
+    if (!predicate || typeof predicate !== "object" || Array.isArray(predicate)) continue;
 
     const rowValue = row[key];
-
-    // eq
-    if (predicate.eq !== undefined) {
-      if (compareValues(rowValue, predicate.eq) !== 0) return false;
-    }
-    // neq
-    if (predicate.neq !== undefined) {
-      if (compareValues(rowValue, predicate.neq) === 0) return false;
-    }
-    // contains
-    if (predicate.contains !== undefined) {
-      const needle = String(predicate.contains);
-      const haystack = typeof rowValue === "string" ? rowValue : String(rowValue);
-      if (!haystack.includes(needle)) return false;
-    }
-    // gt
-    if (predicate.gt !== undefined) {
-      if (compareValues(rowValue, predicate.gt) <= 0) return false;
-    }
-    // gte
-    if (predicate.gte !== undefined) {
-      if (compareValues(rowValue, predicate.gte) < 0) return false;
-    }
-    // lt
-    if (predicate.lt !== undefined) {
-      if (compareValues(rowValue, predicate.lt) >= 0) return false;
-    }
-    // lte
-    if (predicate.lte !== undefined) {
-      if (compareValues(rowValue, predicate.lte) > 0) return false;
-    }
-    // in
-    if (predicate.in !== undefined) {
-      const inArr = predicate.in as readonly unknown[];
-      if (!inArr.some((v) => compareValues(rowValue, v) === 0)) return false;
-    }
-    // nin
-    if (predicate.nin !== undefined) {
-      const ninArr = predicate.nin as readonly unknown[];
-      if (ninArr.some((v) => compareValues(rowValue, v) === 0)) return false;
+    for (const [op, operand] of Object.entries(predicate as Record<string, unknown>)) {
+      const evaluate = OPERATOR_EVALUATORS[op as OperatorName];
+      if (!evaluate) continue; // 未知键（如嵌套对象字段）→ 忽略
+      if (!evaluate(rowValue, operand)) return false;
     }
   }
 
-  // 阶段 2：and/or 子树
-  const andArr = filter.and as Record<string, unknown>[] | undefined;
-  if (andArr && !andArr.every((sub) => matchRow(row, sub, depth + 1))) return false;
+  // 阶段 2：and/or 子树（兼容数组与 OperationFilterInput 单对象两种形态）
+  const andVal = filter["and"];
+  if (andVal !== undefined && andVal !== null) {
+    const andNodes = Array.isArray(andVal) ? andVal : [andVal];
+    if (!andNodes.every((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1))) return false;
+  }
 
-  const orArr = filter.or as Record<string, unknown>[] | undefined;
-  if (orArr && !orArr.some((sub) => matchRow(row, sub, depth + 1))) return false;
+  const orVal = filter["or"];
+  if (orVal !== undefined && orVal !== null) {
+    const orNodes = Array.isArray(orVal) ? orVal : [orVal];
+    if (!orNodes.some((sub) => matchRow(row, sub as Record<string, unknown>, depth + 1))) return false;
+  }
 
   return true;
 }
@@ -158,7 +186,7 @@ function sortRows(rows: Record<string, unknown>[], sort: SortInput[]): Record<st
       const va = a[field];
       const vb = b[field];
       const cmp = compareValues(va, vb);
-      if (cmp !== 0) return dir === "desc" ? -cmp : cmp;
+      if (cmp !== 0) return String(dir).toLowerCase() === "desc" ? -cmp : cmp;
     }
     return 0;
   });
@@ -245,6 +273,39 @@ export function createMockDb(
     return maxId + 1;
   }
 
+  function runQuery<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
+    const rows = tables.get(table);
+    if (!rows) return [];
+    let result = Array.from(rows.values());
+
+    // 过滤
+    if (filter && typeof filter === "object") {
+      result = result.filter((row) => matchRow(row, filter as Record<string, unknown>, 0));
+    }
+
+    // 排序
+    const sortArr: SortInput[] = [];
+    if (sort) {
+      if (Array.isArray(sort)) {
+        sortArr.push(...(sort as SortInput[]));
+      } else if (typeof sort === "object") {
+        sortArr.push(sort as SortInput);
+      }
+    }
+
+    if (sortArr.length > 0) {
+      result = sortRows(result, sortArr);
+    }
+
+    // 分页
+    if (page && typeof page === "object") {
+      const sortFields = sortArr.length > 0 ? Object.keys(sortArr[0]) : ["id"];
+      result = paginateRows(result, page as PageInput, sortFields);
+    }
+
+    return result as T[];
+  }
+
   return {
     registerQuery(field: string, table: string): void {
       fieldTableMap.set(field, table);
@@ -254,37 +315,12 @@ export function createMockDb(
       fieldTableMap.set(field, table);
     },
 
-    query<T>(_table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
-      const rows = tables.get(_table);
-      if (!rows) return [];
-      let result = Array.from(rows.values());
+    query<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
+      return runQuery<T>(table, filter, sort, page);
+    },
 
-      // 过滤
-      if (filter && typeof filter === "object") {
-        result = result.filter((row) => matchRow(row, filter as Record<string, unknown>, 0));
-      }
-
-      // 排序
-      const sortArr: SortInput[] = [];
-      if (sort) {
-        if (Array.isArray(sort)) {
-          sortArr.push(...(sort as SortInput[]));
-        } else if (typeof sort === "object") {
-          sortArr.push(sort as SortInput);
-        }
-      }
-
-      if (sortArr.length > 0) {
-        result = sortRows(result, sortArr);
-      }
-
-      // 分页
-      if (page && typeof page === "object") {
-        const sortFields = sortArr.length > 0 ? Object.keys(sortArr[0]) : ["id"];
-        result = paginateRows(result, page as PageInput, sortFields);
-      }
-
-      return result as T[];
+    queryOne<T>(table: string, filter?: unknown): T | undefined {
+      return runQuery<T>(table, filter)[0];
     },
 
     insert<T>(table: string, row: T): T {

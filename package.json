@@ -1,12 +1,15 @@
 {
   "name": "@tkwf/tsclient-mock",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "LoongBa",
   "license": "MIT",
   "description": "Type-driven mock runtime for @tkwf/tsclient — MockTransport, type-driven factory, in-memory query engine",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "gen-mock-handlers": "./dist/codegen/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

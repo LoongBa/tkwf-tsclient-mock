@@ -84,9 +84,76 @@ Tkwf.configure("default", {
 |------|------|
 | `MockTransport` | 实现 `Transport`：按 field 分发 handler + `delayMs` / `failRate` / `error` 注入 + `executeRawGraphQL` 解析 |
 | `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` |
-| `createMockDb()` | 内存数据库：CRUD + FilterInput/SortInput/分页 + 关联图 + **mutation→query 状态同步** |
+| `createMockDb()` | 内存数据库：CRUD + FilterInput/SortInput/分页 + 关联图 + **mutation→query 状态同步** + `queryOne` + OperationFilterInput 家族兼容 |
+| `gen-mock-handlers` | 消费端 codegen 扩展：读 `ts-client.g.ts` → 生成全部 field 的 handler 骨架 `ts-client.mock.g.ts` |
+| `validateMock` / `selfHealing` / `detectChange` | AI 编排基础设施：schema 校验 / 自愈重试 / 产物变更检测（不内置 LLM） |
 | `defaultSessionHandlers` | 登录链路（requestChallenge / loginByContext / loginByPassword / logout）内置 mock |
-| `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用） |
+| `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用，泛型约束 field/args/result） |
+
+---
+
+## 消费端 codegen 工作流（v1.1.0）
+
+### 一次性生成全部 handler 骨架
+
+```bash
+npx gen-mock-handlers --input src/ts-client.g.ts --output src/ts-client.mock.g.ts
+```
+
+读取消费端 codegen 产物 `ts-client.g.ts`（主包生成），生成 `ts-client.mock.g.ts`：
+
+- **全部 field 的 handler 骨架**（Query/Mutation 分类读 const 对象，不启发式推断）
+- 每个 field 用 `defineMock<{ field; args; result }>` 约束，类型错误编译期暴露
+- 生成 `createMockDb` 内存数据库 + DTO → `MockFieldSchema` 推导（`_types`）
+- 编译期完整性检查：`_AssertAllFieldsCovered` —— 主包 codegen 新增 field 后重跑本命令，漏掉的 API 直接编译报错
+
+生成后的骨架：
+
+```typescript
+export const db = createMockDb({ paymentLogs: [] });
+
+export const handlers = {
+  paymentLogs: defineMock<{ field: "paymentLogs"; args: PaymentLogsArgs; result: PaymentLogConnection }>(
+    (vars) => db.query("paymentLogs", vars?.where, vars?.order, { first: vars?.first, after: vars?.after }),
+  ),
+  createPaymentLog: defineMock<{ field: "createPaymentLog"; args: CreatePaymentLogInput; result: PaymentLog }>(
+    (vars) => db.insert("paymentLogs", vars),
+  ),
+} satisfies Record<keyof typeof Query | keyof typeof Mutation, MockHandler>;
+```
+
+骨架遵循的语义映射：
+
+| field 特征 | 生成骨架 |
+|-----------|---------|
+| `query` + 返回 `XxxConnection` | `db.query("xxx", args.where, args.order, { first, after })` |
+| `query` + 返回单实体 | `db.queryOne("xxx", args.where)` |
+| `mutation` + args 含 `input` | `db.insert("xxx", args.input)` |
+| `mutation` + 命名 create/update/delete | `db.insert` / `db.update(table, id, patch)` / `db.remove(table, id)` |
+| 无法归类 | `db.query("xxx")` + 注释"待 Agent 填充" |
+
+### AI 编排基础设施（`src/ai/`）
+
+不内置 LLM 调用，为消费端 AI/Agent 填充提供三层能力（`validateMock` / `selfHealing` / `detectChange`）：
+
+```typescript
+import { validateMock, selfHealing, detectChange } from "@tkwf/tsclient-mock";
+
+// 1. 校验：mock 数据是否符合 DTO schema（复用 MockFieldSchema）
+const { ok, errors } = validateMock(agentData, dtoSchema);
+
+// 2. 自愈：schema 校验失败自动重新生成（LLM/工厂可注入，默认重试 3 次）
+const data = await selfHealing({
+  schema: dtoSchema,
+  generator: () => llmFill(prompt, dtoSchema),   // LLM 调用由消费端 SKILL 落地
+});
+
+// 3. 变更检测：codegen 产物 sha256 hash 与 sidecar 文件（<output>.hash）比对
+const { hash, changed } = await detectChange(readFileSync("src/ts-client.g.ts", "utf-8"));
+if (changed) console.log("codegen 产物已变更，请重新执行 gen-mock-handlers");
+```
+
+AI 填充工作流：`gen-mock-handlers` 生成骨架 → Agent 填充业务意图（覆盖关键字段）→ `validateMock` 校验 → 失败由 `selfHealing` 重试 → `detectChange` 感知主包 codegen 产物变更。
 
 ---
 
@@ -135,12 +202,12 @@ Mirage 证明了 mutation→query 联动是刚需，但**无人把"类型驱动�
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.0.0 内容（v0.1.x 为预发布内部迭代代号）。
+> 当前实现 = v1.1.0 内容。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
-| **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现，package.json 已为 1.0.0 |
-| **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers.ts`）+ AI 填充编排层 | P1：生成全部 field 的 handler 骨架（`ts-client.mock.g.ts`），Agent 不可能漏掉 API |
+| **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现 |
+| **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers`）+ AI 编排基础设施（validateMock / selfHealing / detectChange）+ mock-db 过滤桥接增强 | ✅ 已实现 |
 | **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | P3/P2：默认/空态/错误态/加载态，Storybook 友好；原型→开发→测试分阶段 |
 | **v1.3.0** | 录制回放（record-replay） | P3：真实请求 HAR 导入 → 回放，测试用真实数据而非手工 mock |
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | P4：mock 数据经过真实 schema 校验，AI 填充错误被自愈重试捕获 |
