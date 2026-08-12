@@ -1,0 +1,40 @@
+{
+  "name": "@tkwf/tsclient-mock",
+  "version": "1.0.0",
+  "author": "LoongBa",
+  "license": "MIT",
+  "description": "Type-driven mock runtime for @tkwf/tsclient — MockTransport, type-driven factory, in-memory query engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./src": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LoongBa/tkwf-tsclient-mock.git"
+  },
+  "devDependencies": {
+    "@tkwf/tsclient": "file:../tkwf-tsclient",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.9"
+  }
+}
