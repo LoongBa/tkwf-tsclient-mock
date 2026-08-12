@@ -10,10 +10,19 @@ export { MockTransport } from "./mock-transport";
 export type { MockHandler, MockTransportOptions } from "./mock-transport";
 
 export { createMockFactory } from "./factory";
-export type { MockFactory } from "./factory";
+export type { MockFactory, MockFactoryOptions, MockFieldSchema } from "./factory";
 
-export { createMockDb } from "./mock-db";
-export type { MockDb, DatasetSeed } from "./mock-db";
+export { createMockDb, encodeCursor, decodeCursor } from "./mock-db";
+export type {
+  MockDb,
+  DatasetSeed,
+  FilterPredicate,
+  FilterInput,
+  SortInput,
+  CursorPage,
+  OffsetPage,
+  PageInput,
+} from "./mock-db";
 
 export { defaultSessionHandlers } from "./session";
 

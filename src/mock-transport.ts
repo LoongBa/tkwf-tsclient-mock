@@ -8,19 +8,27 @@ export type MockHandler = (
 export interface MockTransportOptions {
   /** 全局模拟延迟（ms） */
   delayMs?: number;
-  /** per-field 覆盖：延迟/错误注入 */
+  /** per-field 覆盖：延迟/错误注入/超时模拟 */
   fieldOptions?: Record<string, {
     delayMs?: number;
     error?: unknown;
     failRate?: number;
+    /** 超时模拟（ms）：handler 超时后抛 Error("Mock: timeout for <field>") */
+    timeoutMs?: number;
   }>;
 }
 
 export class MockTransport implements Transport {
+  private handlers: Record<string, MockHandler>;
+  private options?: MockTransportOptions;
+
   constructor(
-    private handlers: Record<string, MockHandler>,
-    private options?: MockTransportOptions,
-  ) {}
+    handlers: Record<string, MockHandler>,
+    options?: MockTransportOptions,
+  ) {
+    this.handlers = handlers;
+    this.options = options;
+  }
 
   async execute<T>(op: {
     field: string;
@@ -49,8 +57,27 @@ export class MockTransport implements Transport {
       throw new Error(`Mock: no handler for "${field}"`);
     }
 
-    // 3. 调用 handler
-    return handler(variables, { sessionKey, signal }) as Promise<T> | T;
+    // 3. 调用 handler，支持 timeoutMs 超时模拟
+    const handlerPromise = handler(variables, { sessionKey, signal }) as Promise<T> | T;
+
+    const timeoutMs = fieldOpt?.timeoutMs;
+    if (timeoutMs === undefined) {
+      return handlerPromise;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`Mock: timeout for "${field}"`)),
+        timeoutMs,
+      );
+    });
+
+    try {
+      return await Promise.race([handlerPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
   }
 
   async executeRawGraphQL<T>(query: string, sessionKey?: string, signal?: AbortSignal): Promise<T> {
@@ -64,8 +91,13 @@ export class MockTransport implements Transport {
   }
 
   private extractField(query: string): string | null {
-    // 简单提取：匹配 query/mutation { FieldName 或 { FieldName
-    const match = query.match(/(?:query|mutation)?\s*\{\s*(\w+)/);
+    // 两阶段提取：
+    // 1. strip 注释（#... 到行尾）
+    // 2. 匹配首个顶层 field
+    const noComments = query.replace(/#[^\n]*/g, "");
+    const match = noComments.match(
+      /^\s*(?:query|mutation)?\s*\w*\s*\{[^}]*?\b(\w+)\b/,
+    );
     return match ? match[1] : null;
   }
 }
