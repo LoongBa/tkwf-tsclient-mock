@@ -558,6 +558,134 @@ describe("createMockDb — v1.6.0 关联过滤嵌套", () => {
   });
 });
 
+describe("createMockDb — v1.7.0 inverse 双向同步", () => {
+  function makeInverseDb() {
+    const db = createMockDb({ logs: [], merchants: [] });
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo",
+      targetTable: "merchants",
+      foreignKey: "merchantId",
+      inverse: "logs",
+    });
+    db.registerRelation("merchants", "logs", {
+      type: "hasMany",
+      targetTable: "logs",
+      foreignKey: "logIds",
+      inverse: "merchant",
+    });
+    return db;
+  }
+
+  it("insert 自动更新 inverse hasMany FK 数组", () => {
+    const db = makeInverseDb();
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "M1", logIds: [] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 10, status: "SUCCESS", merchantId: 1 } as Record<string, unknown>);
+    const merchant = db.queryOne<Record<string, unknown>>("merchants", { id: { eq: 1 } });
+    expect((merchant?.logIds as (string | number)[])).toContain(10);
+  });
+
+  it("insert hasMany 父行同步子行 belongsTo FK", () => {
+    const db = makeInverseDb();
+    db.insert<Record<string, unknown>>("logs", { id: 10, status: "SUCCESS" } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 11, status: "FAILED" } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "M1", logIds: [10, 11] } as Record<string, unknown>);
+    const log10 = db.queryOne<Record<string, unknown>>("logs", { id: { eq: 10 } });
+    expect(log10?.merchantId).toBe(1);
+  });
+
+  it("update FK 变更时旧值移除 + 新值追加", () => {
+    const db = makeInverseDb();
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "M1", logIds: [] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("merchants", { id: 2, name: "M2", logIds: [] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 10, status: "SUCCESS", merchantId: 1 } as Record<string, unknown>);
+
+    // 变更 merchantId 1 → 2
+    db.update<Record<string, unknown>>("logs", 10, { merchantId: 2 } as Record<string, unknown>);
+
+    const m1 = db.queryOne<Record<string, unknown>>("merchants", { id: { eq: 1 } });
+    const m2 = db.queryOne<Record<string, unknown>>("merchants", { id: { eq: 2 } });
+    expect(m1?.logIds).not.toContain(10);
+    expect((m2?.logIds as (string | number)[])).toContain(10);
+  });
+
+  it("remove 时清理 inverse hasMany FK 数组", () => {
+    const db = makeInverseDb();
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "M1", logIds: [] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 10, status: "SUCCESS", merchantId: 1 } as Record<string, unknown>);
+    db.remove("logs", 10);
+    const merchant = db.queryOne<Record<string, unknown>>("merchants", { id: { eq: 1 } });
+    expect((merchant?.logIds as (string | number)[])).not.toContain(10);
+  });
+
+  it("无 inverse 字段时无同步（向后兼容）", () => {
+    const db = createMockDb({ logs: [], merchants: [] });
+    db.registerRelation("logs", "merchant", {
+      type: "belongsTo",
+      targetTable: "merchants",
+      foreignKey: "merchantId",
+      // 无 inverse
+    });
+    db.insert<Record<string, unknown>>("merchants", { id: 1, name: "M1", logIds: [] } as Record<string, unknown>);
+    db.insert<Record<string, unknown>>("logs", { id: 10, status: "SUCCESS", merchantId: 1 } as Record<string, unknown>);
+    const merchant = db.queryOne<Record<string, unknown>>("merchants", { id: { eq: 1 } });
+    // merchants.logIds 未注册为 inverse → 无同步追加，保持初始 []
+    expect(merchant?.logIds).toEqual([]);
+  });
+});
+
+describe("createMockDb — v1.7.0 聚合过滤", () => {
+  function makeAggDb() {
+    return createMockDb({ logs: seed });
+  }
+
+  it("count 基本计数", () => {
+    const db = makeAggDb();
+    const result = db.aggregate("logs", { fields: { total: { function: "count" } } });
+    expect(result.total).toBe(5);
+  });
+
+  it("sum/avg/max/min 数值计算", () => {
+    const db = makeAggDb();
+    const result = db.aggregate("logs", {
+      fields: {
+        totalAmount: { function: "sum", field: "amount" },
+        avgAmount: { function: "avg", field: "amount" },
+        maxAmount: { function: "max", field: "amount" },
+        minAmount: { function: "min", field: "amount" },
+      },
+    });
+    expect(result.totalAmount).toBe(575); // 100+50+200+75+150
+    expect(result.avgAmount).toBe(115);
+    expect(result.maxAmount).toBe(200);
+    expect(result.minAmount).toBe(50);
+  });
+
+  it("filter 先过滤后聚合", () => {
+    const db = makeAggDb();
+    const result = db.aggregate("logs", {
+      fields: {
+        successCount: { function: "count", filter: { status: { eq: "SUCCESS" } } },
+        successSum: { function: "sum", field: "amount", filter: { status: { eq: "SUCCESS" } } },
+      },
+    });
+    expect(result.successCount).toBe(3);
+    expect(result.successSum).toBe(325); // 100+75+150
+  });
+
+  it("where 整体过滤 + per-field filter 为 AND", () => {
+    const db = makeAggDb();
+    const result = db.aggregate("logs", {
+      fields: {
+        total: { function: "count" },
+        successCount: { function: "count", filter: { status: { eq: "SUCCESS" } } },
+      },
+      where: { amount: { gte: 100 } },
+    });
+    expect(result.total).toBe(3); // amount≥100: 100,200,150 → 3
+    expect(result.successCount).toBe(2); // SUCCESS + amount≥100 → 100,150
+  });
+});
+
 describe("createMockDb — queryOne", () => {
   it("queryOne 返回第一条匹配，无匹配返回 undefined", () => {
     const db = makeDb();

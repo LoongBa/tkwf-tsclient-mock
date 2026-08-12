@@ -56,13 +56,15 @@ export interface FilterInput {
 /** 关系类型（v1.6.0 关联过滤） */
 export type RelationType = "hasMany" | "belongsTo";
 
-/** 关系定义（v1.6.0 关联过滤） */
+/** 关系定义（v1.6.0 关联过滤；v1.7.0 inverse 双向同步） */
 export interface RelationDef {
   type: RelationType;
   /** 关联表名 */
   targetTable: string;
   /** 外键字段名（当前表中的字段名） */
   foreignKey: string;
+  /** 双向同步：对方关系定义的 field 名（可选，提供时自动同步 inverse FK 数组） */
+  inverse?: string;
 }
 
 /** 排序声明：{ field: "asc" | "desc" | "ASC" | "DESC" }（大小写归一） */
@@ -133,11 +135,49 @@ export interface MockDb {
    * db.registerRelation("merchants", "logs", {
    *   type: "hasMany",
    *   targetTable: "paymentLogs",
-   *   foreignKey: "merchantId",
+   *   foreignKey: "logIds",
    * });
    */
   registerRelation(table: string, field: string, relation: RelationDef): void;
+
+  /**
+   * 聚合查询（v1.7.0）。
+   * 返回聚合值，不参与过滤引擎。
+   *
+   * @example
+   * db.aggregate("logs", {
+   *   fields: {
+   *     totalAmount: { function: "sum", field: "amount" },
+   *     avgAmount: { function: "avg", field: "amount" },
+   *     successCount: { function: "count", filter: { status: { eq: "SUCCESS" } } },
+   *   },
+   *   where: { amount: { gte: 50 } },
+   * });
+   */
+  aggregate(table: string, input: AggregateInput): AggregateResult;
 }
+
+/** 聚合函数（v1.7.0） */
+export type AggregateFunction = "count" | "avg" | "sum" | "max" | "min";
+
+/** 聚合字段定义 */
+export interface AggregateField {
+  function: AggregateFunction;
+  /** 聚合字段名（count 不需要，avg/sum/max/min 需要） */
+  field?: string;
+  /** 聚合前过滤（可选，与 where 为 AND 关系） */
+  filter?: FilterInput;
+}
+
+/** 聚合输入 */
+export interface AggregateInput {
+  fields: Record<string, AggregateField>;
+  /** 整体过滤（可选） */
+  where?: FilterInput;
+}
+
+/** 聚合结果 */
+export type AggregateResult = Record<string, number>;
 
 // ─── 混合类型比较 ───────────────────────────────────────────
 
@@ -477,6 +517,74 @@ export function createMockDb(
     return maxId + 1;
   }
 
+  // ── v1.7.0 inverse 同步辅助 ──
+
+  function syncInverseBeforeUpdate(
+    table: string, id: string | number, patch: Record<string, unknown>,
+    oldRow: Record<string, unknown>,
+  ): void {
+    const tableRelations = relationRegistry.get(table);
+    if (!tableRelations) return;
+    for (const [, rel] of tableRelations) {
+      if (!rel.inverse || !(rel.foreignKey in patch)) continue;
+      const oldFk = oldRow[rel.foreignKey] as string | number | undefined;
+      const newFk = patch[rel.foreignKey] as string | number | undefined;
+      if (oldFk === newFk) continue;
+
+      const targetRelations = relationRegistry.get(rel.targetTable);
+      const inverseRel = targetRelations?.get(rel.inverse);
+      if (!inverseRel) continue;
+      const targetTable = tables.get(rel.targetTable);
+      if (!targetTable) continue;
+
+      if (oldFk !== undefined && oldFk !== null) {
+        const oldRow = targetTable.get(oldFk);
+        if (oldRow) {
+          const oldArray = oldRow[inverseRel.foreignKey] as (string | number)[] | undefined;
+          if (oldArray) {
+            targetTable.set(oldFk, { ...oldRow, [inverseRel.foreignKey]: oldArray.filter((i) => i !== id) });
+          }
+        }
+      }
+
+      if (newFk !== undefined && newFk !== null) {
+        const newRow = targetTable.get(newFk);
+        if (newRow) {
+          const currentArray = newRow[inverseRel.foreignKey] as (string | number)[] | undefined;
+          const newArray = currentArray
+            ? currentArray.includes(id) ? currentArray : [...currentArray, id]
+            : [id];
+          targetTable.set(newFk, { ...newRow, [inverseRel.foreignKey]: newArray });
+        }
+      }
+    }
+  }
+
+  function syncInverseBeforeRemove(table: string, id: string | number, row: Record<string, unknown>): void {
+    const tableRelations = relationRegistry.get(table);
+    if (!tableRelations) return;
+    for (const [, rel] of tableRelations) {
+      if (!rel.inverse) continue;
+      const fkValue = row[rel.foreignKey];
+      if (fkValue === undefined || fkValue === null) continue;
+
+      const targetRelations = relationRegistry.get(rel.targetTable);
+      const inverseRel = targetRelations?.get(rel.inverse);
+      if (!inverseRel) continue;
+      const targetTable = tables.get(rel.targetTable);
+      if (!targetTable) continue;
+
+      const targetRow = targetTable.get(fkValue as string | number);
+      if (!targetRow) continue;
+      const currentArray = targetRow[inverseRel.foreignKey] as (string | number)[] | undefined;
+      if (!currentArray) continue;
+      const newArray = currentArray.filter((i) => i !== id);
+      if (newArray.length !== currentArray.length) {
+        targetTable.set(fkValue as string | number, { ...targetRow, [inverseRel.foreignKey]: newArray });
+      }
+    }
+  }
+
   function runQuery<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
     const rows = tables.get(table);
     if (!rows) return [];
@@ -528,6 +636,52 @@ export function createMockDb(
       tableRelations.set(field, relation);
     },
 
+    // ── v1.7.0 聚合查询 ──
+
+    aggregate(table: string, input: AggregateInput): AggregateResult {
+      const rows = tables.get(table);
+      if (!rows) {
+        const result: AggregateResult = {};
+        for (const key of Object.keys(input.fields)) {
+          const def = input.fields[key];
+          result[key] = def.function === "count" ? 0 : 0;
+        }
+        return result;
+      }
+
+      let data = Array.from(rows.values());
+
+      // where 整体过滤
+      if (input.where && typeof input.where === "object") {
+        data = data.filter((row) => matchRow(row, input.where as Record<string, unknown>, 0, table));
+      }
+
+      const result: AggregateResult = {};
+      for (const [key, def] of Object.entries(input.fields)) {
+        let fieldData = data;
+
+        // per-field filter
+        if (def.filter && typeof def.filter === "object") {
+          fieldData = fieldData.filter((row) => matchRow(row, def.filter as Record<string, unknown>, 0, table));
+        }
+
+        const values = fieldData.map((row) => {
+          if (def.function === "count") return 1;
+          const v = def.field ? Number(row[def.field]) : NaN;
+          return Number.isNaN(v) ? 0 : v;
+        });
+
+        switch (def.function) {
+          case "count": result[key] = values.length; break;
+          case "sum":  result[key] = values.reduce((a, b) => a + b, 0); break;
+          case "avg":  result[key] = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0; break;
+          case "max":  result[key] = values.length > 0 ? Math.max(...values) : 0; break;
+          case "min":  result[key] = values.length > 0 ? Math.min(...values) : 0; break;
+        }
+      }
+      return result;
+    },
+
     query<T>(table: string, filter?: unknown, sort?: unknown, page?: unknown): T[] {
       return runQuery<T>(table, filter, sort, page);
     },
@@ -548,6 +702,40 @@ export function createMockDb(
       }
       const id = (entry.id ?? entry.Id) as string | number;
       tables.get(table)!.set(id, entry);
+
+      // inverse 同步（belongsTo→hasMany + hasMany→belongsTo）
+      const rels = relationRegistry.get(table);
+      if (rels) {
+        for (const [, rel] of rels) {
+          if (!rel.inverse) continue;
+          const fkValue = entry[rel.foreignKey];
+          if (fkValue === undefined || fkValue === null) continue;
+
+          const targetRels = relationRegistry.get(rel.targetTable);
+          const inverseRel = targetRels?.get(rel.inverse);
+          if (!inverseRel) continue;
+          const targetTable = tables.get(rel.targetTable);
+          if (!targetTable) continue;
+
+          if (rel.type === "belongsTo") {
+            const targetRow = targetTable.get(fkValue as string | number);
+            if (!targetRow) continue;
+            const currentArray = targetRow[inverseRel.foreignKey] as (string | number)[] | undefined;
+            const newArray = currentArray
+              ? currentArray.includes(id) ? currentArray : [...currentArray, id]
+              : [id];
+            targetTable.set(fkValue as string | number, { ...targetRow, [inverseRel.foreignKey]: newArray });
+          } else if (rel.type === "hasMany") {
+            const fkArray = Array.isArray(fkValue) ? (fkValue as (string | number)[]) : [];
+            for (const childId of fkArray) {
+              const childRow = targetTable.get(childId);
+              if (childRow) {
+                targetTable.set(childId, { ...childRow, [inverseRel.foreignKey]: id });
+              }
+            }
+          }
+        }
+      }
       return entry as T;
     },
 
@@ -556,7 +744,9 @@ export function createMockDb(
       if (!rows) return undefined;
       const existing = rows.get(id);
       if (!existing) return undefined;
-      const updated = { ...existing, ...(patch as Record<string, unknown>) };
+      const patchObj = patch as Record<string, unknown>;
+      syncInverseBeforeUpdate(table, id, patchObj, existing);
+      const updated = { ...existing, ...patchObj };
       rows.set(id, updated);
       return updated as T;
     },
@@ -564,6 +754,10 @@ export function createMockDb(
     remove(table: string, id: string | number): boolean {
       const rows = tables.get(table);
       if (!rows) return false;
+      const existing = rows.get(id);
+      if (existing) {
+        syncInverseBeforeRemove(table, id, existing);
+      }
       return rows.delete(id);
     },
 

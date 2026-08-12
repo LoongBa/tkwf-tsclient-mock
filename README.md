@@ -93,6 +93,7 @@ Tkwf.configure("default", {
 | `createRecordingTransport()` | 录制回放装饰器：record/replay/passthrough 三态模式，真实请求录制 → 测试回放 |
 | `mockFieldSchemaToZod()` | 运行时契约校验：`MockFieldSchema → zod` 适配器，`validateMock` 底层基于 zod safeParse |
 | `registerRelation()` | 关联过滤嵌套：`registerRelation` 声明外键关系，`some`/`every`/`none` 关联查询 |
+| `aggregate()` | 聚合查询：`db.aggregate(table, { fields })` 支持 count/avg/sum/max/min |
 
 ---
 
@@ -463,6 +464,7 @@ npm install --save-dev zod@^4
 | **v1.4.0** | 运行时契约校验（TS 类型 → zod） | ✅ 已实现 |
 | **v1.5.0** | 查询语义增强（FilterInput 操作符扩展） | ✅ 已实现 |
 | **v1.6.0** | 关联过滤嵌套（some/every/none） | ✅ 已实现 |
+| **v1.7.0** | 关系增强（双向同步 + codegen 关系推导 + 聚合过滤） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 
