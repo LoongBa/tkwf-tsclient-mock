@@ -167,3 +167,49 @@ describe("createMockFactory", () => {
     expect(item.userId).toBe("mock-2");
   });
 });
+
+describe("createMockFactory — _relations 关联数据生成（v2.0.1）", () => {
+  interface Order {
+    id: string;
+    total: number;
+  }
+  interface Customer {
+    id: string;
+    name: string;
+    orderIds: string[];
+  }
+
+  const customerSchema: Record<keyof Customer, MockFieldSchema> = {
+    id: { kind: "string", isId: true },
+    name: { kind: "string" },
+    orderIds: { kind: "array", element: { kind: "string" } },
+  };
+  const orderSchema: Record<keyof Order, MockFieldSchema> = {
+    id: { kind: "string", isId: true },
+    total: { kind: "number" },
+  };
+
+  it("_relations makeN 生成关联数据", () => {
+    const orderFactory = createMockFactory<Order>({ _types: orderSchema });
+    const customerFactory = createMockFactory<Customer>({
+      _types: customerSchema,
+      _relations: {
+        orderIds: { factory: orderFactory, count: 3, fkField: "customerId" },
+      },
+    });
+    // make 不触发 _relations
+    const single = customerFactory.make();
+    expect(single.orderIds).toEqual([]);
+    // makeN 触发 _relations（id 接续 make 之后）
+    const one = customerFactory.makeN(1);
+    expect(one[0]?.orderIds?.length).toBe(3);
+    expect(one[0]?.id).toBe("mock-2");
+  });
+
+  it("不传 _relations 时向后兼容", () => {
+    const factory = createMockFactory<Customer>({ _types: customerSchema });
+    const items = factory.makeN(3);
+    expect(items).toHaveLength(3);
+    expect(items[0]?.orderIds).toEqual([]);
+  });
+});

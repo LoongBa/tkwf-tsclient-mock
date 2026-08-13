@@ -21,6 +21,16 @@ export interface GeneratorConfig {
   generator?: (ctx: GeneratorContext) => unknown;
 }
 
+/** 关联数据生成配置（v2.0.1） */
+export interface RelationFactoryConfig {
+  /** 目标工厂 */
+  factory: MockFactory<unknown>;
+  /** 每主实体生成的关联数量 */
+  count: number;
+  /** 外键字段名（子实体上指向父实体的字段，如 "merchantId"） */
+  fkField?: string;
+}
+
 /** 生成上下文（v2.0.0） */
 export interface GeneratorContext {
   fieldName: string;
@@ -57,6 +67,8 @@ export interface MockFactoryOptions<T> {
   _generators?: Record<string, GeneratorConfig>;
   /** 外部 faker 实例（仅显式注入，Oracle 🔴6） */
   _faker?: Record<string, unknown>;
+  /** 关联数据生成（v2.0.1：如每个 merchant 生成 3 条 paymentLog，FK 自动关联） */
+  _relations?: Record<string, RelationFactoryConfig>;
 }
 
 export interface MockFactory<T> {
@@ -251,13 +263,46 @@ export function createMockFactory<T>(options?: MockFactoryOptions<T>): MockFacto
   const {
     _types, _enums = {}, _seed = 42, _maxDepth = 3,
     _dateBase = new Date("2026-01-01T00:00:00Z"),
-    _strategy = "minimal", _generators, _faker,
+    _strategy = "minimal", _generators, _faker, _relations,
   } = options ?? {};
 
   const state: MutableFactoryState = {
     seed: _seed, counter: 0, idCounter: 0,
     cycleState: new Map(),
   };
+
+  const MAX_RELATION_DEPTH = 3;
+
+  /** 生成关联数据（v2.0.1） */
+  function generateRelations(
+    parentId: string | number,
+    parent: Record<string, unknown>,
+    relations: Record<string, RelationFactoryConfig>,
+    visited: Set<string>,
+    depth: number,
+  ): void {
+    if (depth > MAX_RELATION_DEPTH) return;
+    for (const [field, config] of Object.entries(relations)) {
+      if (visited.has(field)) continue;
+      visited.add(field);
+
+      const children = config.factory.makeN(config.count, {}) as Record<string, unknown>[];
+      // 设置子实体的 FK 字段指向父实体
+      const fkField = config.fkField ?? "parentId";
+      const childIds: (string | number)[] = [];
+      for (const child of children) {
+        const childId = (child.id ?? child.Id) as string | number;
+        if (childId !== undefined) {
+          child[fkField] = parentId;
+          childIds.push(childId);
+        }
+      }
+      // 设置父实体的关联字段为子实体 ID 数组
+      if (childIds.length > 0) {
+        parent[field] = childIds;
+      }
+    }
+  }
 
   function make(overrides?: Partial<T>): T {
     state.counter++;
@@ -291,10 +336,23 @@ export function createMockFactory<T>(options?: MockFactoryOptions<T>): MockFacto
   return {
     make,
     makeN(count: number, overrides?: Partial<T>): T[] {
-      return Array.from({ length: count }, () => make(overrides));
+      const items = Array.from({ length: count }, () => make(overrides));
+      // 关联数据生成（v2.0.1）
+      const hasRelations = _relations !== undefined;
+      if (hasRelations) {
+        const visited = new Set<string>();
+        for (const item of items) {
+          const itemId = (item as Record<string, unknown>).id as string | number | undefined;
+          if (itemId !== undefined) {
+            generateRelations(itemId, item as Record<string, unknown>, _relations!, visited, 0);
+          }
+        }
+      }
+      return items;
     },
     makeMany(items: Partial<T>[]): T[] {
       return items.map((item) => make(item));
     },
   };
 }
+
