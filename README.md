@@ -82,12 +82,39 @@ Tkwf.configure("default", {
 
 ---
 
+## 真实感数据生成（可选，需 faker.js）
+
+`createMockFactory` 支持 `_strategy: "realistic"` 策略，自动将字段名映射到真实数据（人名/公司名/地址/电话等）。需要安装 `@faker-js/faker` 并传入实例：
+
+```bash
+npm install --save-dev @faker-js/faker
+```
+
+```typescript
+import { fakerZH_CN } from "@faker-js/faker";
+import { createMockFactory } from "@tkwf/tsclient-mock";
+import type { Merchant } from "./gql/ts-client.g";
+
+const factory = createMockFactory<Merchant>({
+  _types: MerchantSchema,
+  _strategy: "realistic",
+  _faker: fakerZH_CN,
+});
+
+const merchant = factory.make();
+// → { name: "张三", company: "星辰科技有限公司", address: "朝阳区建国路88号", phone: "13800138000" }
+```
+
+> **提示**：`_strategy: "realistic"` 不传 `_faker` 时会自动降级为 `minimal` 策略，并输出 console.warn 提示安装 faker.js。
+
+---
+
 ## 核心能力
 
 | 模块 | 能力 |
 |------|------|
 | `MockTransport` | 实现 `Transport`：按 field 分发 handler + `delayMs` / `failRate` / `error` 注入 + `executeRawGraphQL` 解析 |
-| `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` + `_strategy: "realistic" \| "minimal"` 策略 + `_generators` 字段覆盖 + `_relations` 关联数据 |
+| `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` + `_strategy: "realistic" \| "minimal"` 策略（需 faker.js） + `_generators` 字段覆盖 + `_relations` 关联数据 |
 | `createMockDb()` | 内存数据库：CRUD + FilterInput/SortInput/分页 + 关联图 + **mutation→query 状态同步** + `queryOne` + OperationFilterInput 家族兼容 |
 | `gen-mock-handlers` | 消费端 codegen 扩展：读 `ts-client.g.ts` → 生成全部 field 的 handler 骨架 `ts-client.mock.g.ts` |
 | `validateMock` / `selfHealing` / `detectChange` | AI 编排基础设施：schema 校验 / 自愈重试 / 产物变更检测（不内置 LLM） |

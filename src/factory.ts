@@ -61,11 +61,23 @@ export interface MockFactoryOptions<T> {
   _seed?: number;
   _maxDepth?: number;
   _dateBase?: Date;
-  /** 生成策略（默认 "minimal"） */
+  /** 生成策略。默认 "minimal"（零外部依赖，生成 mock-xxx 格式数据）。
+   * 设为 "realistic" 时需传入 `_faker` 实例（通过 `@faker-js/faker` 获取），
+   * 字段名会自动匹配到合适的数据生成策略（人名/公司/地址/电话等）。
+   * @example
+   * import { fakerZH_CN } from "@faker-js/faker";
+   * createMockFactory({ _strategy: "realistic", _faker: fakerZH_CN });
+   */
   _strategy?: GenerationStrategy;
   /** 字段级生成策略覆盖 */
   _generators?: Record<string, GeneratorConfig>;
-  /** 外部 faker 实例（仅显式注入，Oracle 🔴6） */
+  /** 外部 faker 实例（仅显式注入，需消费端自行安装 @faker-js/faker）。
+   * 配合 `_strategy: "realistic"` 使用，自动将字段名匹配到 faker 方法。
+   * 不传时使用内置的 minimal 策略（零外部依赖）。
+   * @example
+   * import { fakerZH_CN } from "@faker-js/faker";
+   * { _strategy: "realistic", _faker: fakerZH_CN }
+   */
   _faker?: Record<string, unknown>;
   /** 关联数据生成（v2.0.1：如每个 merchant 生成 3 条 paymentLog，FK 自动关联） */
   _relations?: Record<string, RelationFactoryConfig>;
@@ -265,6 +277,16 @@ export function createMockFactory<T>(options?: MockFactoryOptions<T>): MockFacto
     _dateBase = new Date("2026-01-01T00:00:00Z"),
     _strategy = "minimal", _generators, _faker, _relations,
   } = options ?? {};
+
+  // 提示：_strategy: "realistic" 需要 _faker 实例
+  if (_strategy === "realistic" && !_faker) {
+    console.warn(
+      "[tsclient-mock] _strategy: \"realistic\" 需要传入 _faker 实例。"
+      + " 安装 @faker-js/faker 后，传入 faker 对象："
+      + ' createMockFactory({ _strategy: "realistic", _faker: fakerZH_CN })'
+      + " 未传入时将降级为 minimal 策略。",
+    );
+  }
 
   const state: MutableFactoryState = {
     seed: _seed, counter: 0, idCounter: 0,
