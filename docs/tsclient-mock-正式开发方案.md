@@ -1,8 +1,8 @@
 # @tkwf/tsclient-mock — 正式开发方案（总纲）
 
-> **状态**：✅ v1.0.0–v1.9.0 已全部开发完成并发布；主包 transport 注入点待办（见 §9）
+> **状态**：✅ v1.0.0–v1.9.0 全部开发完成并发布；主包 transport 注入点 v1.1.0 已完成
 > **方案编写**：2026-08-12（v1.0.0 原有讨论方案归档合并）
-> **版本范围**：mock 包 v1.0.0–v1.9.0 + 主包 v1.1.0（transport 注入点，待办）
+> **版本范围**：mock 包 v1.0.0–v1.9.0 + 主包 v1.1.0（transport 注入点，✅ 已完成）
 > **关联**：AGENTS_TKWF.md（开发规则）、G07F（ts-client 使用指南）、G07M（ts-client-mock 使用指南）
 
 ---
@@ -11,8 +11,8 @@
 
 | 包 | 版本 | 说明 | 状态 |
 |----|------|------|------|
-| `@tkwf/tsclient-mock` | v1.0.0 → **v1.9.0** | mock 运行时：Transport 注入 / 内存数据库 / 工厂 / 场景 / 录制回放 / zod 校验 / 关联过滤 / HTTP server 等 | ✅ 已发布 |
-| `@tkwf/tsclient` | **v1.1.0** | minor：新增 `DomainHostClientOptions.transport` 注入点（约 5 行改动） | ⬜ 待办（另一仓库） |
+| `@tkwf/tsclient-mock` | v1.0.0 → **v1.9.0** | mock 运行时：Transport 注入 / 内存数据库 / 工厂 / 场景 / 录制回放 / zod 校验 / 关联过滤 / HTTP server 等 | ✅ 已全部发布 |
+| `@tkwf/tsclient` | **v1.1.0** | minor：新增 `DomainHostClientOptions.transport` 注入点 | ✅ 已完成 |
 
 > ⚠️ mock 是独立包而非内置：dev-time 工具与生产 SDK 分离，生产零携带（只进 `devDependencies`）。
 
@@ -157,7 +157,7 @@ src/
 | v1.7.1 | codegen 关系推导（inferDtoRelations + registerRelation 骨架） | 211 | ✅ |
 | v1.8.0 | HTTP mock server（MockHttpServer + CORS/鉴权/GraphQL over HTTP） | 224 | ✅ |
 | v1.9.0 | 工厂 DSL（defineXxxFactory 骨架）+ buildDataset FK 校验（strict） | 228 | ✅ |
-| **下一版** | 主包 transport 注入点落地后联调验证 | — | ⬜ |
+| **下一版** | 主包 transport 注入点落地后联调验证 | — | ✅ 已完成 |
 
 > 每个版本独立走：开发方案 → Oracle 审核 → 开发 → 审核报告 → 提交 → tag（征求同意自动发布 npm）。
 
@@ -338,11 +338,13 @@ ts-client.mock.g.ts
 
 ---
 
-## 九、主包 transport 注入点（待办，另一仓库）
+## 九、主包 transport 注入点（已完成 ✅）
 
 > 消费端接入 mock 需要 `@tkwf/tsclient` 提供 Transport 注入点。当前 `Tkwf.configure()` 只支持 `endpoint`/`transportType`，没有注入自定义 Transport 的入口。
 
-### 改动（约 5 行）
+**状态**：主包 `@tkwf/tsclient` v1.1.0 已新增 `DomainHostClientOptions.transport` 字段（约 5 行改动），已完成。
+
+### 改动
 
 ```typescript
 // src/domain-host-client.ts
@@ -353,20 +355,38 @@ export interface DomainHostClientOptions {
 }
 
 private createTransport(): Transport {
-  if (this.options?.transport) return this.options.transport;  // ← 新增
+  if (this.options?.transport) return this.options.transport;
   // ...原有 GraphQL/Rest 分支
 }
+```
+
+### 消费端使用
+
+```typescript
+import { Tkwf } from "@tkwf/tsclient";
+import { MockTransport, createMockDb } from "@tkwf/tsclient-mock";
+
+const db = createMockDb({ paymentLogs: [] });
+const transport = new MockTransport({
+  paymentLogs: (vars) => db.query("paymentLogs", vars?.where, vars?.order, { first: vars?.first }),
+}, { delayMs: 150 });
+
+Tkwf.configure("default", {
+  endpoint: "/graphql",
+  transport,   // ← 注入 mock，单行切换
+});
+
+// 业务代码零改动：Tkwf.User.Use<PaymentLogService>().getList() 自动走 mock
 ```
 
 ### 注意事项
 
 | 项 | 说明 |
 |----|------|
-| **优先级** | `transport` > `transportType` > 默认 GraphQL |
-| **类型安全** | `transport` 字段类型为 `Transport` 接口，`MockTransport` 已实现，无需额外适配 |
-| **未注入时** | 行为完全不变 |
-| **测试** | 2 条：注入的 transport 被使用 / 未注入时行为不变 |
-| **依赖关系** | 主包不依赖 mock 包；mock 包只 `import type { Transport }` 主包类型 |
+| **优先级** | `transport` > `transportType` > 默认 GraphQL。设置了 `transport` 后 `endpoint`/`transportType`/`restPathPrefix` 均被忽略 |
+| **类型安全** | `transport` 字段类型为 `Transport` 接口（`execute` + `executeRawGraphQL`），`MockTransport` 已实现，无需额外适配 |
+| **未注入时** | 行为完全不变，走原有 GraphQL/Rest 分支 |
+| **依赖关系** | 主包不依赖 mock 包；mock 包只 `import type { Transport }` 主包类型——运行时无反向依赖 |
 
 ---
 
