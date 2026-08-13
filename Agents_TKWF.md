@@ -41,10 +41,11 @@ TypeScript Domain 客户端 mock 运行时，为 `@tkwf/tsclient` 提供 Transpo
 
 ## 4. Tag 与发布纪律
 
-- **任何 `git tag` 操作（创建/推送）和 `npm publish` 必须事先征求用户同意**。tag = 版本发布确认（触发 npm publish）。
+- **任何 `git tag` 操作（创建/推送）和 `npm publish` 必须事先征求用户同意**。tag = 版本发布确认（触发 GitHub Actions 自动发布到 npm）。
 - 日常开发、迭代完成 → 只 `push` 提交，**不自动打 tag**。
 - 用户明确同意后，使用 `v` 前缀（如 `v1.0.0`），版本号与 `package.json` 一致。
 - 发布 workflow 由 tag 推送自动触发（`.github/workflows/publish.yml`），包含 Sigstore 签名（`--provenance`）。
+- `NODE_AUTH_TOKEN` 已配置为仓库 Secrets 中的 `NPM_TOKEN`。
 
 ## 5. CI 与测试
 
