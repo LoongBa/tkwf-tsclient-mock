@@ -53,22 +53,30 @@ export function dbSkeleton(tableInits: Record<string, string>): string {
  * 生成 default 和 empty 两个数据集，每个数据集包含所有表的空数组。
  * @param tableInits 表名 → 实体类型名的映射
  */
-export function scenariosSkeleton(tableInits: Record<string, string>): string {
+export function scenariosSkeleton(tableInits: Record<string, string>, dtoNames: string[] = []): string {
   const entries = Object.entries(tableInits).map(([table, type]) => {
     if (!type || type === "unknown") {
       return `    ${table}: [] /* TODO: 无实体类型，Agent 自行填充 */`;
     }
+    // 查找对应的 defineXxx 名
+    const defName = dtoNames.find((n) => n.toLowerCase() === type.toLowerCase());
+    if (defName) {
+      return `    ${table}: define${defName}.makeN(5),`;
+    }
     return `    ${table}: [] satisfies ${type}[]`;
   });
-  const block = entries.join(",\n");
+  const block = entries.join("\n");
   return [
-    "// ── 场景数据集骨架（数据留 Agent 填充） ──",
+    "// ── 场景数据集骨架（v2.0.0：default 预填充，empty 保持空） ──",
     "export const scenarios = {",
     "  default: {",
     block,
     "  },",
     "  empty: {",
-    block,
+    Object.entries(tableInits).map(([table, type]) => {
+      if (!type || type === "unknown") return `    ${table}: [] /* TODO */`;
+      return `    ${table}: [] satisfies ${type}[]`;
+    }).join(",\n"),
     "  },",
     "};",
     "",

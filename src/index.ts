@@ -10,7 +10,15 @@ export { MockTransport } from "./mock-transport.js";
 export type { MockHandler, MockTransportOptions } from "./mock-transport.js";
 
 export { createMockFactory } from "./factory.js";
-export type { MockFactory, MockFactoryOptions, MockFieldSchema } from "./factory.js";
+export type {
+  MockFactory,
+  MockFactoryOptions,
+  MockFieldSchema,
+  GenerationStrategy,
+  GeneratorConfig,
+  GeneratorContext,
+  MutableFactoryState,
+} from "./factory.js";
 
 export { createMockDb, encodeCursor, decodeCursor } from "./mock-db.js";
 export type {

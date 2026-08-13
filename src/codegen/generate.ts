@@ -57,18 +57,21 @@ export function generate(source: string, inputPath: string, outputPath: string):
     tableInits[table] = entityType;
   }
   lines.push(tpl.dbSkeleton(tableInits));
-  lines.push(tpl.scenariosSkeleton(tableInits));
-  lines.push(tpl.scenarioOverridesSkeleton());
 
-  // DTO schema 常量
+  // DTO schema 常量（提前声明：XxxSchema 先于 defineXxx、先于 scenarios）
   const dtoBlocks = Object.entries(dtoSchemas).map(([name, schema]) => ({
     name,
     schema: tpl.schemaLiteral(schema, "  "),
   }));
   lines.push(tpl.dtoTypeSchemas(dtoBlocks));
 
-  // 工厂 DSL 骨架（v1.9.0）
+  // 工厂 DSL 骨架（v1.9.0）— 引用 XxxSchema，必须在 dtoTypeSchemas 之后
   lines.push(tpl.factorySkeleton(dtoBlocks));
+
+  // 场景数据集骨架（v2.0.0：default 调用 defineXxx.makeN() 预填充）
+  const dtoNames = Object.keys(dtoSchemas);
+  lines.push(tpl.scenariosSkeleton(tableInits, dtoNames));
+  lines.push(tpl.scenarioOverridesSkeleton());
 
   // 运行时校验骨架（v1.4.0）
   const schemaNames = Object.keys(dtoSchemas);

@@ -99,7 +99,7 @@ describe("generate", () => {
   it("生成产物包含 scenarios 和 scenarioOverrides 骨架块", () => {
     const result = generate(fixture, fixturePath, fixturePath.replace("sample.g.ts", "sample.mock.g.ts"));
     // scenarios 数据集骨架：default / empty 两个数据集，每个含全部表的空数组
-    expect(result.content).toContain("// ── 场景数据集骨架（数据留 Agent 填充） ──");
+    expect(result.content).toContain("// ── 场景数据集骨架（v2.0.0：default 预填充，empty 保持空） ──");
     expect(result.content).toContain("export const scenarios = {");
     expect(result.content).toContain("  default: {");
     expect(result.content).toContain("  empty: {");
