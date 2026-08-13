@@ -83,7 +83,7 @@ TypeScript Domain 客户端 mock 运行时，为 `@tkwf/tsclient` 提供 Transpo
 **每次 `git tag` 之前，必须先向用户确认是否需要同步以上文档**（`_TKWF` 是独立仓库，tag 不会自动触发文档同步）。确认流程：
 
 ```
-tag 前 → 询问用户："是否同步 _TKWF 文档（D07M/G07M）？"
-        → 是：git -C _TKWF add/commit/push
+tag 前 → 询问用户："是否同步 _TKWF 文档（D07M/G07M）和 README？"
+        → 是：git -C _TKWF add/commit/push + git add README.md && commit
         → 否：跳过，下次 tag 时再次询问
 ```
