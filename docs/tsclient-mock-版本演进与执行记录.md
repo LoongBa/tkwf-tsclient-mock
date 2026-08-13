@@ -1,7 +1,7 @@
 # @tkwf/tsclient-mock — 版本演进与执行记录
 
-> **状态**：✅ v1.0.0–v2.0.1 全部开发完成并发布；主包 transport 注入点 v1.1.0 已完成
-> **版本范围**：mock 包 v1.0.0–v2.0.1 + 主包 v1.1.0
+> **状态**：✅ v1.0.0–v1.2.2 已发布；v1.3.0–v1.9.0 为历史开发 tag（未独立发布）；v2.0.0/v2.0.1 方案合并回 v1.2.2
+> **版本范围**：mock 包当前版本 v1.2.2 + 主包 v1.1.0
 > **关联**：D07M（设计方案）、G07M（使用指南）、AGENTS_TKWF.md（开发规则）
 
 ---
@@ -24,16 +24,10 @@
 | v1.0.0 | MockTransport / createMockFactory / createMockDb / 会话 | 105 | — | ✅ |
 | v1.1.0 | gen-mock-handlers + AI 编排（validateMock/selfHealing/detectChange） | — | — | ✅ |
 | v1.2.0 | 场景切换（setScenario）+ 多数据集 + createScenarioContext + codegen 场景骨架 | 131 | 4🔴+5🟡 | ✅ |
-| v1.3.0 | 录制回放（record-replay）+ FileRecordingStore + 归一化器 | 161 | 2🔴+6🟡 | ✅ |
-| v1.4.0 | 运行时契约校验（MockFieldSchema → zod v4）+ validateMock 迁移 | 180 | 4🔴+4🟡 | ✅ |
-| v1.5.0 | 查询语义增强（isNull/between/mode/containsAny/containsAll） | 191 | 3🔴+4🟡 | ✅ |
-| v1.6.0 | 关联过滤嵌套（registerRelation + some/every/none） | 200 | 3🔴+4🟡 | ✅ |
-| v1.7.0 | 双向同步（inverse）+ 聚合过滤（aggregate） | 209 | 5🔴+9🟡 | ✅ |
-| v1.7.1 | codegen 关系推导（inferDtoRelations + registerRelation 骨架） | 211 | — | ✅ |
-| v1.8.0 | HTTP mock server（MockHttpServer + CORS/鉴权/GraphQL over HTTP） | 224 | 4🔴+7🟡 | ✅ |
-| v1.9.0 | 工厂 DSL（defineXxxFactory 骨架）+ buildDataset FK 校验（strict） | 228 | — | ✅ |
-| **v2.0.0** | **策略化数据生成（_strategy/_generators/_faker + 字段名映射 + codegen 预填充）** | **228** | **5🔴+9🟡** | ✅ |
-| **v2.0.1** | **关联数据生成（_relations + generateRelations + 循环防护）** | **230** | — | ✅ |
+| v1.3.0–v1.9.0 | 录制回放 / zod 校验 / 查询增强 / 关联过滤 / 双向同步+聚合 / 关系推导 / HTTP server / 工厂 DSL | 161–228 | 逐版本审查 | ⚠️ 历史开发 tag（能力并入 v1.2.2） |
+| **v2.0.0** | **策略化数据生成（_strategy/_generators/_faker + 字段名映射 + codegen 预填充）** | **228** | **5🔴+9🟡** | ⚠️ 方案（版本合并至 v1.2.2） |
+| **v2.0.1** | **关联数据生成（_relations + generateRelations + 循环防护）** | **230** | — | ⚠️ 方案（版本合并至 v1.2.2） |
+| **v1.2.2** | **当前发布版：汇总 v1.3.0–v1.9.0 全部能力 + 策略化工厂 + 关联数据生成** | **230** | — | ✅ 已发布 |
 
 > 每个版本独立走：开发方案 → Oracle 审核 → 开发 → 审核报告 → 提交 → tag（征求同意自动发布 npm）。
 

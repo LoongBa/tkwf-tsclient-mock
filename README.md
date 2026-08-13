@@ -485,22 +485,16 @@ npm install --save-dev zod@^4
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v2.0.1 内容。
+> 当前实现 = v1.2.2 内容。
+> **版本说明**：v1.3.0–v1.9.0 为历史开发 tag（未独立发布）；v2.0.0/v2.0.1 方案已合并回 v1.2.2 发布（版本号回退，避免大版本跳跃）。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
-| **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ 已实现 |
-| **v1.1.0** | 消费端 codegen 扩展（`gen-mock-handlers`）+ AI 编排基础设施（validateMock / selfHealing / detectChange）+ mock-db 过滤桥接增强 | ✅ 已实现 |
-| **v1.2.0** | 场景切换（`setScenario`）+ 分阶段策略落地 | ✅ 已实现 |
-| **v1.3.0** | 录制回放（record-replay） | ✅ 已实现 |
-| **v1.4.0** | 运行时契约校验（TS 类型 → zod） | ✅ 已实现 |
-| **v1.5.0** | 查询语义增强（FilterInput 操作符扩展） | ✅ 已实现 |
-| **v1.6.0** | 关联过滤嵌套（some/every/none） | ✅ 已实现 |
-| **v1.7.0** | 关系增强（双向同步 + codegen 关系推导 + 聚合过滤） | ✅ 已实现 |
-| **v1.8.0** | HTTP mock server（基于 node:http 的轻量 HTTP 层 mock） | ✅ 已实现 |
-| **v1.9.0** | 工厂 DSL（defineXxxFactory 骨架）+ buildDataset FK 校验 | ✅ 已实现 |
-| **v2.0.0** | 策略化数据生成（`_strategy`/`_generators`/`_faker` + 字段名映射 + codegen 预填充） | ✅ 已实现 |
-| **v2.0.1** | 关联数据生成（`_relations` + generateRelations + 循环防护） | ✅ 已实现 |
+| **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ |
+| **v1.1.0** | codegen 扩展 + AI 编排（validateMock/selfHealing/detectChange） | ✅ |
+| **v1.2.0** | 场景切换（setScenario）+ 分阶段策略 | ✅ |
+| **v1.2.2** | **当前版**：策略化数据生成（realistic/minimal）+ 关联数据生成（_relations）+ 全部历史能力汇总（含录制回放/zod 校验/关联过滤/HTTP server/工厂 DSL） | ✅ 当前版本 |
+| ~~v1.3.0–v1.9.0~~ | 历史开发 tag：录制回放/zod/查询增强/关联过滤/双向同步/HTTP server/工厂 DSL | 已并入 v1.2.2 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 
