@@ -87,7 +87,7 @@ Tkwf.configure("default", {
 | 模块 | 能力 |
 |------|------|
 | `MockTransport` | 实现 `Transport`：按 field 分发 handler + `delayMs` / `failRate` / `error` 注入 + `executeRawGraphQL` 解析 |
-| `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` |
+| `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` + `_strategy: "realistic" \| "minimal"` 策略 + `_generators` 字段覆盖 + `_relations` 关联数据 |
 | `createMockDb()` | 内存数据库：CRUD + FilterInput/SortInput/分页 + 关联图 + **mutation→query 状态同步** + `queryOne` + OperationFilterInput 家族兼容 |
 | `gen-mock-handlers` | 消费端 codegen 扩展：读 `ts-client.g.ts` → 生成全部 field 的 handler 骨架 `ts-client.mock.g.ts` |
 | `validateMock` / `selfHealing` / `detectChange` | AI 编排基础设施：schema 校验 / 自愈重试 / 产物变更检测（不内置 LLM） |
@@ -458,7 +458,7 @@ npm install --save-dev zod@^4
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.4.0 内容。
+> 当前实现 = v2.0.1 内容。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
@@ -471,6 +471,9 @@ npm install --save-dev zod@^4
 | **v1.6.0** | 关联过滤嵌套（some/every/none） | ✅ 已实现 |
 | **v1.7.0** | 关系增强（双向同步 + codegen 关系推导 + 聚合过滤） | ✅ 已实现 |
 | **v1.8.0** | HTTP mock server（基于 node:http 的轻量 HTTP 层 mock） | ✅ 已实现 |
+| **v1.9.0** | 工厂 DSL（defineXxxFactory 骨架）+ buildDataset FK 校验 | ✅ 已实现 |
+| **v2.0.0** | 策略化数据生成（`_strategy`/`_generators`/`_faker` + 字段名映射 + codegen 预填充） | ✅ 已实现 |
+| **v2.0.1** | 关联数据生成（`_relations` + generateRelations + 循环防护） | ✅ 已实现 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 
