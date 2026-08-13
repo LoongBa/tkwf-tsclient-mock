@@ -15,8 +15,9 @@ TypeScript Domain 客户端 mock 运行时，为 `@tkwf/tsclient` 提供 Transpo
 ## 2. 版本体系
 
 - **语义化版本**：手动管理，`package.json` 中 `version` 字段 + `git tag` 确认。
-- **标签前缀**：`v`（如 `v1.0.0`、`v1.0.1`）。
+- **标签前缀**：`v`（如 `v1.0.0`、`v1.2.2`）。
 - 版本号与主包 `@tkwf/tsclient` 独立，mock 包从 `v1.0.0` 起步。
+- **`git tag` 必须与 `package.json` 的 `version` 字段一致**（如 `package.json` 中 `"version": "1.2.2"` 则 tag 为 `v1.2.2`）。不一致会导致 `npm publish` 发布错误的版本号。
 
 ## 3. 迭代开发流程
 
