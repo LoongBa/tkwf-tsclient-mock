@@ -51,9 +51,6 @@ export type { ScenarioContext, ScenarioConfig, FieldOption, BuiltinScenario } fr
 export { validateMock, selfHealing, detectChange, sha256, configureSidecar } from "./ai/index.js";
 export type { ValidateResult, SidecarStore } from "./ai/index.js";
 
-export { MockHttpServer } from "./http-mock/server.js";
-export type { MockHttpServerOptions } from "./http-mock/server.js";
-
 export { GraphQLHandler } from "./http-mock/graphql-handler.js";
 export type { GraphQLRequestBody, GraphQLHandlerResult } from "./http-mock/graphql-handler.js";
 
@@ -72,8 +69,6 @@ export type {
   RecordingMode,
   RecordingTransportOptions,
 } from "./record-replay.js";
-
-export { FileRecordingStore } from "./file-recording-store.js";
 
 export { mockFieldSchemaToZod, validateWithZod } from "./zod.js";
 export type { ValidateIssue, ValidateWithZodResult } from "./zod.js";

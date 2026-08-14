@@ -43,12 +43,27 @@ export function generate(source: string, inputPath: string, outputPath: string):
   // 推导 import 相对路径：从 output 目录到 input 文件的相对路径
   const importPath = deriveImportPath(inputPath, outputPath);
 
+  // 源文件真实导出的类型名（interface + type alias）
+  const exportedNames = new Set<string>([
+    ...model.parsedDoc.interfaces.map((i) => i.name),
+    ...model.parsedDoc.typeAliases.map((a) => a.name),
+  ]);
+  const sourceHasQuery = /export\s+const\s+Query\s*=/.test(source);
+  const sourceHasMutation = /export\s+const\s+Mutation\s*=/.test(source);
+
   // 收集源文件中的类型引用（供 import）
   const typeNames = collectTypeNames(model);
+  // 真正存在于源文件导出的 → import；其余（方法名推导的实体等）→ 本地兜底别名
+  const importableNames = typeNames.filter((n) => exportedNames.has(n) || (n === "Query" && sourceHasQuery) || (n === "Mutation" && sourceHasMutation));
+  const fallbackNames = typeNames.filter((n) => !importableNames.includes(n));
+
+  // 实体关联注册（v1.8.0）—— 提前计算以决定 MockDb 是否需要 import
+  const relations = inferDtoRelations(model.parsedDoc, dtoSchemas);
 
   const lines: string[] = [];
   lines.push(tpl.header());
-  lines.push(tpl.imports(importPath, typeNames));
+  lines.push(tpl.imports(importPath, importableNames, { includeMockDb: relations.length > 0 }));
+  lines.push(tpl.fallbackTypeAliases(fallbackNames));
 
   // 表名推导：实体类型 → 表
   const tableToTypes = collectTables(serviceMethods);
@@ -78,7 +93,6 @@ export function generate(source: string, inputPath: string, outputPath: string):
   lines.push(tpl.validateZodHelpers(schemaNames));
 
   // 实体关联注册骨架（v1.8.0）—— 从 DTO 类型自动推断 registerRelation
-  const relations = inferDtoRelations(model.parsedDoc, dtoSchemas);
   if (relations.length > 0) {
     const relationCalls = relations.map((rel) => {
       const table = entityTypeToTableName(rel.sourceDto);
@@ -124,7 +138,8 @@ function deriveImportPath(inputPath: string, outputPath: string): string {
 
 /**
  * 收集生成产物中需要 import 的类型名。
- * 只收集真正的类型（args 类型、返回类型、Query/Mutation const），排除基础类型。
+ * 只收集真正的类型（args 类型、返回类型、Query/Mutation const），排除基础类型
+ * 和非简单标识符（如 `Record<string, unknown>`、泛型）。
  */
 function collectTypeNames(model: CodegenModel): string[] {
   const names = new Set<string>();
@@ -148,6 +163,10 @@ function collectTypeNames(model: CodegenModel): string[] {
       names.add(entity);
     }
   }
+  // DTO schema 泛型引用的类型名（factorySkeleton 的 createMockFactory<Xxx>）
+  for (const name of Object.keys(model.dtoSchemas)) {
+    names.add(name);
+  }
   // Query / Mutation const 类型名
   names.add("Query");
   names.add("Mutation");
@@ -156,8 +175,15 @@ function collectTypeNames(model: CodegenModel): string[] {
 
 const PRIMITIVE_TYPES = new Set(["boolean", "string", "number", "long", "int", "void", "Date", "DateTime"]);
 
+/**
+ * 判断类型名是否为"基础/非导入类型"：
+ * - 基础类型（string/number 等）
+ * - 非简单标识符：含泛型参数（Record<string, unknown>）、联合、复合文本 → 不做 import
+ */
 function isPrimitiveType(typeName: string): boolean {
-  return PRIMITIVE_TYPES.has(typeName);
+  if (PRIMITIVE_TYPES.has(typeName)) return true;
+  // 简单标识符：/^[A-Za-z_$][\w$]*$/ → 可导入的类型名；其余（含 < > | 空格等）非导入候选
+  return !/^[A-Za-z_$][\w$]*$/.test(typeName);
 }
 
 /**
@@ -198,26 +224,23 @@ function renderHandler(method: ServiceMethod): string {
       const idExpr = method.hasIdField ? "vars?.id" : "vars?.input?.id";
       const entity = method.entityType ?? "unknown";
       const body = [
-        `return db.update<${entity}>("${table}", ${idExpr} as string | number, (vars?.input ?? {}) as Partial<${entity}>) as ${returnTypeName};`,
+        `return db.update<${entity}>("${table}", ${idExpr} as string | number, (vars?.input ?? {}) as Partial<${entity}>) as unknown as ${returnTypeName};`,
         tpl.idExtractionTodo(),
       ].join("\n    ");
       return tpl.handlerBlock(fieldName, argsTypeName, returnTypeName, body, " (mutation)");
     }
     // insert 类 mutation（create）
     if (method.hasInput) {
-      const body = `return db.insert("${table}", vars?.input) as ${returnTypeName};`;
+      const body = `return db.insert("${table}", vars?.input) as unknown as ${returnTypeName};`;
       return tpl.handlerBlock(fieldName, argsTypeName, returnTypeName, body, " (mutation)");
     }
     // delete / remove 类 mutation
     if (method.name.toLowerCase().startsWith("delete") || method.name.toLowerCase().startsWith("remove")) {
-      const body = `return db.remove("${table}", vars?.id as string | number) as ${returnTypeName};`;
+      const body = `return db.remove("${table}", vars?.id as string | number) as unknown as ${returnTypeName};`;
       return tpl.handlerBlock(fieldName, argsTypeName, returnTypeName, body, " (mutation)");
     }
-    // 无法归类 mutation
-    const body = [
-      `return db.query("${table}");`,
-      "// " + tpl.agentFillTodo(),
-    ].join("\n    ");
+    // 无法归类 mutation → queryOne 兜底（返回单实体，与 result 类型一致）
+    const body = `return db.queryOne("${table}") as unknown as ${returnTypeName};`;
     return tpl.handlerBlock(fieldName, argsTypeName, returnTypeName, body, " (mutation)");
   }
 

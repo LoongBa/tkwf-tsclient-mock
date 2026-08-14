@@ -19,18 +19,47 @@ export function header(): string {
 /**
  * import 语句。
  * @param importPath 源 ts-client.g.ts 的相对路径（如 "./ts-client.g"）
+ * @param typeNames 需要 import 的类型名
+ * @param options 可选配置：includeMockDb 是否导入 MockDb（仅 registerRelations 需要时）
  */
-export function imports(importPath: string, typeNames: string[]): string {
-  const typeImports = typeNames.filter(Boolean);
+export function imports(
+  importPath: string,
+  typeNames: string[],
+  options: { includeMockDb?: boolean } = {},
+): string {
+  const mockTypeParts = options.includeMockDb
+    ? ["MockHandler", "ScenarioConfig", "MockDb"]
+    : ["MockHandler", "ScenarioConfig"];
   const lines: string[] = [
-    'import type { MockHandler, ScenarioConfig, MockDb } from "@tkwf/tsclient-mock";',
+    `import type { ${mockTypeParts.join(", ")} } from "@tkwf/tsclient-mock";`,
     'import { createMockDb, defineMock, createMockFactory } from "@tkwf/tsclient-mock";',
   ];
+  // Query/Mutation 是 const（值），`keyof typeof Query` 需要值空间 → 值导入
+  const valueImports = typeNames.filter((n) => n === "Query" || n === "Mutation");
+  const typeImports = typeNames.filter((n) => n !== "Query" && n !== "Mutation");
+  if (valueImports.length > 0) {
+    lines.push(`import { ${valueImports.join(", ")} } from "${importPath}";`);
+  }
   if (typeImports.length > 0) {
     lines.push(`import type { ${typeImports.join(", ")} } from "${importPath}";`);
   }
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * 源文件未导出的兜底类型别名（如从方法名推导的实体类型 BatchWithData）。
+ * 生成 `type Xxx = Record<string, unknown>;` 保证编译通过。
+ * @param typeNames 需要兜底的类型名列表
+ */
+export function fallbackTypeAliases(typeNames: string[]): string {
+  if (typeNames.length === 0) return "";
+  const lines = typeNames.map((n) => `type ${n} = Record<string, unknown>;`);
+  return [
+    "// 以下类型代码生成器从方法名提取但源未导出，定义别名兜底",
+    ...lines,
+    "",
+  ].join("\n");
 }
 
 /**
@@ -61,11 +90,11 @@ export function scenariosSkeleton(tableInits: Record<string, string>, dtoNames: 
     // 查找对应的 defineXxx 名
     const defName = dtoNames.find((n) => n.toLowerCase() === type.toLowerCase());
     if (defName) {
-      return `    ${table}: define${defName}.makeN(5),`;
+      return `    ${table}: define${defName}.makeN(5)`;
     }
     return `    ${table}: [] satisfies ${type}[]`;
   });
-  const block = entries.join("\n");
+  const block = entries.join(",\n");
   return [
     "// ── 场景数据集骨架（v2.0.0：default 预填充，empty 保持空） ──",
     "export const scenarios = {",
@@ -279,7 +308,9 @@ export function handlerBlock(
     lines.push(`    args: ${argsTypeName};`);
   }
   lines.push(`    result: ${returnTypeName};`);
-  lines.push(`  }>((vars) => {`);
+  // body 引用 vars 时用 (vars)，否则用 (_vars) 避免 noUnusedLocals 报错
+  const paramName = body.includes("vars") ? "vars" : "_vars";
+  lines.push(`  }>((${paramName}) => {`);
   lines.push(`    ${body}`);
   lines.push(`  }),`);
   return lines.join("\n");
@@ -303,7 +334,7 @@ export function assertAllFieldsCovered(): string {
     "// ── 完整性覆盖检查：新增 field 缺 handler → 编译报错 ──",
     "type _AllFields = keyof typeof Query | keyof typeof Mutation;",
     "type _AssertAllFieldsCovered = [Exclude<_AllFields, keyof typeof handlers>] extends [never] ? true : never;",
-    "const _check: _AssertAllFieldsCovered = true;",
+    "export const _check: _AssertAllFieldsCovered = true;",
     "",
   ].join("\n");
 }
