@@ -158,7 +158,9 @@ describe("createScenarioContext — 协调器联动", () => {
     expect(transport.getScenario()).toBe("default");
     await expect(
       transport.execute({ field: "getLogs", type: "query" }),
-    ).resolves.toHaveLength(5);
+    ).resolves.toEqual({ getLogs: expect.any(Array) });
+    const afterReset = await transport.execute<{ getLogs: unknown[] }>({ field: "getLogs", type: "query" });
+    expect(afterReset.getLogs).toHaveLength(5);
   });
 
   it("切换期间 handler 执行中：in-flight 请求使用执行开始时的场景配置", async () => {
@@ -186,7 +188,7 @@ describe("createScenarioContext — 协调器联动", () => {
     // in-flight 请求捕获的是执行开始时的 loading 配置
     // → 不抛 error 注入，正常返回，且经过 loading 的长延迟
     const result = await inFlight;
-    expect(result).toEqual({ pong: true });
+    expect(result).toEqual({ ping: { pong: true } });
     expect(Date.now() - start).toBeGreaterThanOrEqual(25);
 
     // 后续新请求使用 error 配置 → 抛注入错误

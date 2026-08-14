@@ -8,7 +8,19 @@ describe("MockTransport", () => {
     });
 
     const result = await transport.execute({ field: "ping", type: "query" });
-    expect(result).toEqual({ pong: true });
+    expect(result).toEqual({ ping: { pong: true } });
+  });
+
+  it("wraps handler result under field name — GraphQL data 形状（对齐 GraphQLTransport.parseResponse）", async () => {
+    const transport = new MockTransport({
+      loginByPassword: () => ({ success: true, userName: "admin" }),
+    });
+
+    const result = await transport.execute<{ loginByPassword: { success: boolean } }>({
+      field: "loginByPassword",
+      type: "mutation",
+    });
+    expect(result.loginByPassword).toEqual({ success: true, userName: "admin" });
   });
 
   it("throws for unknown field", async () => {
@@ -90,7 +102,7 @@ describe("MockTransport", () => {
     const result = await transport.executeRawGraphQL(
       'query GetPaymentLog { paymentLog(id: "1") { id } }',
     );
-    expect(result).toEqual({ id: "1" });
+    expect(result).toEqual({ paymentLog: { id: "1" } });
   });
 
   it("extracts field from multi-line query with comments", async () => {
@@ -107,7 +119,7 @@ describe("MockTransport", () => {
         }
       }
     `);
-    expect(result).toEqual({ name: "Alice" });
+    expect(result).toEqual({ me: { name: "Alice" } });
   });
 
   it("extracts field from mutation with nested fields", async () => {
@@ -118,7 +130,7 @@ describe("MockTransport", () => {
     const result = await transport.executeRawGraphQL(
       "mutation { createOrder(input: { items: [] }) { id } }",
     );
-    expect(result).toEqual({ id: "42" });
+    expect(result).toEqual({ createOrder: { id: "42" } });
   });
 
   it("takes first top-level field when multiple exist", async () => {
@@ -129,7 +141,7 @@ describe("MockTransport", () => {
     const result = await transport.executeRawGraphQL(
       "query { user { id } me { id } }",
     );
-    expect(result).toEqual({ name: "Alice" });
+    expect(result).toEqual({ user: { name: "Alice" } });
   });
 
   it("throws when field cannot be extracted", async () => {

@@ -118,24 +118,30 @@ export class MockTransport implements Transport {
     }
 
     // 3. 调用 handler，支持 timeoutMs 超时模拟
-    const handlerPromise = handler(variables, { sessionKey, signal, scenario: this.scenario }) as Promise<T> | T;
+    const handlerPromise = Promise.resolve(
+      handler(variables, { sessionKey, signal, scenario: this.scenario }),
+    );
 
     // timeoutMs: scenarios[scenario].fieldOptions?.[field]?.timeoutMs ?? fieldOptions?.[field]?.timeoutMs
     const effTimeoutMs = scenarioFieldOpt?.timeoutMs ?? fieldOpt?.timeoutMs;
-    if (effTimeoutMs === undefined) {
-      return handlerPromise;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let settled: Promise<unknown> = handlerPromise;
+    if (effTimeoutMs !== undefined) {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`Mock: timeout for "${field}"`)),
+          effTimeoutMs,
+        );
+      });
+      settled = Promise.race([handlerPromise, timeoutPromise]);
     }
 
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(
-        () => reject(new Error(`Mock: timeout for "${field}"`)),
-        effTimeoutMs,
-      );
-    });
-
     try {
-      return await Promise.race([handlerPromise, timeoutPromise]);
+      const handlerResult = await settled;
+      // GraphQL 契约：execute() 返回 GraphQL `data` 对象（{ [field]: 结果 }），
+      // 与 GraphQLTransport.parseResponse（返回 json.data）保持一致。
+      // 上层 DomainClientUser.loginAs/loginByContext/QueryBuilder 均按该形状消费。
+      return { [field]: handlerResult } as T;
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     }

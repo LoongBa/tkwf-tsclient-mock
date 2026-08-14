@@ -70,7 +70,8 @@ describe("MockHttpServer — GraphQL", () => {
   }
 
   it("POST /graphql 返回 200 + data", async () => {
-    const transport = makeFakeTransport(() => ({ nodes: [], totalCount: 0 }));
+    // fake 模拟 MockTransport：execute 已按 GraphQL 契约返回 { [field]: result }
+    const transport = makeFakeTransport((field) => ({ [field]: { nodes: [], totalCount: 0 } }));
     const server = await startServer(transport);
     const res = await fetchJson(`http://127.0.0.1:${server.port}/graphql`, {
       method: "POST",
@@ -78,7 +79,7 @@ describe("MockHttpServer — GraphQL", () => {
       body: JSON.stringify({ query: "query { paymentLogs }" }),
     });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ data: { nodes: [], totalCount: 0 } });
+    expect(res.body).toEqual({ data: { paymentLogs: { nodes: [], totalCount: 0 } } });
   });
 
   it("POST /graphql 传递 variables", async () => {
