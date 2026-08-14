@@ -116,7 +116,7 @@ const merchant = factory.make();
 | `MockTransport` | 实现 `Transport`：按 field 分发 handler + `delayMs` / `failRate` / `error` 注入 + `executeRawGraphQL` 解析 |
 | `createMockFactory<T>()` | 类型驱动默认值生成（递归）+ 确定性种子 + `make/makeN/makeMany` + `_strategy: "realistic" \| "minimal"` 策略（需 faker.js） + `_generators` 字段覆盖 + `_relations` 关联数据 |
 | `createMockDb()` | 内存数据库：CRUD + FilterInput/SortInput/分页 + 关联图 + **mutation→query 状态同步** + `queryOne` + OperationFilterInput 家族兼容 |
-| `gen-mock-handlers` | 消费端 codegen 扩展：读 `ts-client.g.ts` → 生成全部 field 的 handler 骨架 `ts-client.mock.g.ts` |
+| `gen-mock-handlers` | 消费端 codegen 扩展：读 `ts-client.g.ts` → 生成全部 field 的 handler 骨架 `ts-client.mock.g.ts`；v1.3.0 支持 `--mock-spec` 生成 MOCK_SPEC.md 映射表 + `createMockDb` 反向引用注释 |
 | `validateMock` / `selfHealing` / `detectChange` | AI 编排基础设施：schema 校验 / 自愈重试 / 产物变更检测（不内置 LLM） |
 | `defaultSessionHandlers` | 登录链路（requestChallenge / loginByContext / loginByPassword / logout）内置 mock |
 | `defineMock()` | 类型化 handler 定义辅助（消费端 codegen 产物使用，泛型约束 field/args/result） |
@@ -136,6 +136,30 @@ const merchant = factory.make();
 ```bash
 npx gen-mock-handlers --input src/ts-client.g.ts --output src/ts-client.mock.g.ts
 ```
+
+### 同时生成 MOCK_SPEC.md 映射表（v1.3.0）
+
+```bash
+npx gen-mock-handlers --input src/ts-client.g.ts --output src/ts-client.mock.g.ts \
+    --mock-spec .TKWF/merchant/MOCK_SPEC.md
+```
+
+`--mock-spec` 幂等更新 `MOCK_SPEC.md` 的 API → 数据表映射表：
+- 已存在 `<!-- auto-generated: mapping-table -->` 标记段 → 只替换标记段，保留手写的数据策略
+- 无标记 → 追加到文件末尾
+- 文件不存在 → 创建
+
+生成的 `createMockDb` 同时携带反向引用注释，指示 Agent 每张表影响哪些 API：
+
+```typescript
+export const db = createMockDb({
+  loginPayloads: [] satisfies LoginPayload[],  // → API: loginByContext, loginByPassword, logout
+  paymentLogs: [] satisfies PaymentLog[],      // → API: loadPaymentLogs
+});
+```
+
+MOCK_SPEC.md 模板（含填写指引）位于 `skills/tkwf-tsclient-mock/MOCK_SPEC.md.template`，
+配合 `tkwf-tsclient-mock` skill 使用，指导 Agent 完成从文档到 `data.ts` 的完整填充流程。
 
 读取消费端 codegen 产物 `ts-client.g.ts`（主包生成），生成 `ts-client.mock.g.ts`：
 
@@ -485,16 +509,17 @@ npm install --save-dev zod@^4
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.2.2 内容。
-> **版本说明**：v1.3.0–v1.9.0 为历史开发 tag（未独立发布）；v2.0.0/v2.0.1 方案已合并回 v1.2.2 发布（版本号回退，避免大版本跳跃）。
+> 当前实现 = v1.3.0 内容。
+> **历史版本说明**：旧 v1.3.0–v1.9.0 为历史开发 tag（未独立发布，已并入 v1.2.2）；当前 v1.3.0 为全新发布，内容为 Mock Agent 支撑。
 
 | 版本 | 内容 | 说明 |
 |------|------|------|
 | **v1.0.0** | 三大核心（MockTransport / createMockFactory / createMockDb） | ✅ |
 | **v1.1.0** | codegen 扩展 + AI 编排（validateMock/selfHealing/detectChange） | ✅ |
 | **v1.2.0** | 场景切换（setScenario）+ 分阶段策略 | ✅ |
-| **v1.2.2** | **当前版**：策略化数据生成（realistic/minimal）+ 关联数据生成（_relations）+ 全部历史能力汇总（含录制回放/zod 校验/关联过滤/HTTP server/工厂 DSL） | ✅ 当前版本 |
-| ~~v1.3.0–v1.9.0~~ | 历史开发 tag：录制回放/zod/查询增强/关联过滤/双向同步/HTTP server/工厂 DSL | 已并入 v1.2.2 |
+| **v1.2.2** | 策略化数据生成（realistic/minimal）+ 关联数据生成（_relations）+ 全部历史能力汇总（含录制回放/zod 校验/关联过滤/HTTP server/工厂 DSL） | ✅ |
+| **v1.3.0** | **Mock Agent 支撑**：`createMockDb` 反向注释（`// → API:`）+ `gen-mock-handlers --mock-spec` + MOCK_SPEC.md 模板 + `tkwf-tsclient-mock` skill | ✅ 当前版本 |
+| ~~历史 tag~~ | v1.3.0–v1.9.0 旧历史开发 tag（录制回放/zod/查询增强/关联过滤/双向同步/HTTP server/工厂 DSL） | 已并入 v1.2.2 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。
 

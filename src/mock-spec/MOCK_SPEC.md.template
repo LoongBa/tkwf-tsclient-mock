@@ -1,0 +1,78 @@
+# Mock 数据规格 (MOCK_SPEC)
+
+> 本文件定义每张 mock 数据表填什么数据、填多少、字段取什么值。
+> **Agent 或开发者填充 `<项目>/src/mock/data.ts` 时，以本文件为数据策略依据。**
+>
+> 维护方式：
+> - **一、API 映射表**：由 `gen-mock-handlers --mock-spec` 自动生成（幂等更新标记段）
+> - **二、数据策略**：手写，随需求变更更新
+> - **三、表间关系**：手写，随数据模型变更更新
+
+---
+
+## 一、API → 数据表映射
+
+> 每张表对应哪些 API。Agent 填充某张表时，知道会影响哪些页面。
+> 自动生成，与 `ts-client.mock.g.ts` 的 `// → API:` 注释对齐。
+
+<!-- auto-generated: mapping-table -->
+（由 `gen-mock-handlers --mock-spec` 填充）
+<!-- end-auto-generated -->
+
+---
+
+## 二、数据策略
+
+> ⚠️ **填写指引**：
+> 1. 每行对应 `src/mock/data.ts` 的 `initialData` 中一条数组记录
+> 2. **最少条数**：确保该 API 页面不空即可，不是越多越好
+> 3. **关键字段约束**：字段值必须满足什么条件（如 `success=true`、`totalAmount > 0`）
+> 4. 参考文档：
+>    - 字段名和类型 → `schema.graphql` 中对应 DTO 类型定义
+>    - 字段含义和业务规则 → `DOMAIN_MAP.md` 实体字段描述 + `Business.md` 业务规则
+>    - 业务流程 → 项目需求文档（如 `docs/Rxx-*.md`）
+> 5. 边界态（空数据/错误态）由 `scenarioOverrides` 覆盖，不在 `initialData` 中模拟
+> 6. 金额字段在个位数到万位数之间，不出现 0 或负数
+> 7. 时间字段使用 `new Date()` 或相对当前时间的 ISO 字符串
+
+### {业务域 1}
+
+| 表 | 最少条数 | 关键字段约束 | 填写参考 |
+|----|---------|-------------|---------|
+| `{tableName}` | （填） | （填） | `文档引用` |
+
+### {业务域 2}
+
+| 表 | 最少条数 | 关键字段约束 | 填写参考 |
+|----|---------|-------------|---------|
+| `{tableName}` | （填） | （填） | `文档引用` |
+
+---
+
+## 三、表间关系
+
+> 外键约束说明。填充 `data.ts` 时需保证引用一致性。
+> 参考 `DOMAIN_MAP.md` 各实体字段定义确认外键字段名。
+
+| 表 | 外键字段 | 关联表 | 说明 |
+|----|---------|--------|------|
+| `{tableName}` | `{fkField}` | `{targetTable}` | （说明） |
+
+---
+
+## 四、schema 变更后的同步流程
+
+当 `schema.graphql` 变更（新增 field、新增 API、改字段类型）时，按顺序执行：
+
+```bash
+buildSchema.ps1 -Quick                                        # ① 更新 schema.graphql
+npm run gen-ts-client                                          # ② 更新 ts-client.g.ts（类型 + 服务接口）
+npm run gen-mock                                               # ③ 更新 ts-client.mock.g.ts（新 handler 骨架 + // → API: 注释）
+gen-mock-handlers --mock-spec <本文件路径>                     # ④ 更新本文件第一节映射表
+```
+
+执行第③④步后：
+1. `ts-client.mock.g.ts` 的 `createMockDb` 会自动新增/删除表，并更新 `// → API:` 注释
+2. `--mock-spec` 幂等更新本文件第一节的 API 映射表
+3. 如果新增了表，补充第二节数据策略、第三节表间关系
+4. 编辑 `src/mock/data.ts` 补充新表的初始数据

@@ -65,14 +65,20 @@ export function fallbackTypeAliases(typeNames: string[]): string {
 /**
  * 内存数据库骨架。
  * @param tableInits 表名 → 空数组初始化的映射
+ * @param tableToFields 表名 → 使用该表的 API field 列表（用于生成反向引用注释）
  */
-export function dbSkeleton(tableInits: Record<string, string>): string {
+export function dbSkeleton(tableInits: Record<string, string>, tableToFields?: Record<string, string[]>): string {
   const entries = Object.entries(tableInits)
-    .map(([table, type]) => `  ${table}: [] satisfies ${type}[]`)
-    .join(",\n");
+    .map(([table, type], i, arr) => {
+      const fields = tableToFields?.[table];
+      const comma = i < arr.length - 1 ? "," : ",";
+      const comment = fields ? `  // → API: ${fields.join(", ")}` : "";
+      return `  ${table}: [] satisfies ${type}[]${comma}${comment}`;
+    })
+    .join("\n");
   return [
     "// ── 内存数据库（骨架，Agent 填充初始数据） ──",
-    `export const db = createMockDb({\n${entries},\n});`,
+    `export const db = createMockDb({\n${entries}\n});`,
     "",
   ].join("\n");
 }
@@ -81,31 +87,51 @@ export function dbSkeleton(tableInits: Record<string, string>): string {
  * 场景数据集骨架。
  * 生成 default 和 empty 两个数据集，每个数据集包含所有表的空数组。
  * @param tableInits 表名 → 实体类型名的映射
+ * @param dtoNames DTO 名列表（用于查找 defineXxx 工厂）
+ * @param tableToFields 表名 → 使用该表的 API field 列表（用于生成反向引用注释）
  */
-export function scenariosSkeleton(tableInits: Record<string, string>, dtoNames: string[] = []): string {
-  const entries = Object.entries(tableInits).map(([table, type]) => {
+export function scenariosSkeleton(
+  tableInits: Record<string, string>,
+  dtoNames: string[] = [],
+  tableToFields?: Record<string, string[]>,
+): string {
+  // 只渲染条目主体（不含逗号/注释），由调用方决定分隔符和注释位置
+  const renderEntryBase = (table: string, type: string, useFactory: boolean): string => {
     if (!type || type === "unknown") {
       return `    ${table}: [] /* TODO: 无实体类型，Agent 自行填充 */`;
     }
     // 查找对应的 defineXxx 名
     const defName = dtoNames.find((n) => n.toLowerCase() === type.toLowerCase());
-    if (defName) {
+    if (useFactory && defName) {
       return `    ${table}: define${defName}.makeN(5)`;
     }
     return `    ${table}: [] satisfies ${type}[]`;
-  });
-  const block = entries.join(",\n");
+  };
+
+  // 逗号在注释之前（`base,` + ` // comment`），避免 `,` 被 `//` 吞掉
+  const renderLine = (table: string, type: string, useFactory: boolean, withApiComment: boolean): string => {
+    const comma = ",";
+    const comment = withApiComment && tableToFields?.[table]
+      ? `  // → API: ${tableToFields[table].join(", ")}`
+      : "";
+    return `${renderEntryBase(table, type, useFactory)}${comma}${comment}`;
+  };
+
+  const entries = Object.entries(tableInits)
+    .map(([table, type]) => renderLine(table, type, true, true))
+    .join("\n");
+  // empty 数据集保持空数组（不为空态预填充工厂数据）
+  const emptyEntries = Object.entries(tableInits)
+    .map(([table, type]) => renderLine(table, type, false, false))
+    .join("\n");
   return [
     "// ── 场景数据集骨架（v2.0.0：default 预填充，empty 保持空） ──",
     "export const scenarios = {",
     "  default: {",
-    block,
+    entries,
     "  },",
     "  empty: {",
-    Object.entries(tableInits).map(([table, type]) => {
-      if (!type || type === "unknown") return `    ${table}: [] /* TODO */`;
-      return `    ${table}: [] satisfies ${type}[]`;
-    }).join(",\n"),
+    emptyEntries,
     "  },",
     "};",
     "",
@@ -336,6 +362,33 @@ export function assertAllFieldsCovered(): string {
     "type _AssertAllFieldsCovered = [Exclude<_AllFields, keyof typeof handlers>] extends [never] ? true : never;",
     "export const _check: _AssertAllFieldsCovered = true;",
     "",
+  ].join("\n");
+}
+
+/**
+ * MOCK_SPEC.md 的 API → 数据表映射表（v1.3.0）。
+ * 渲染 `<!-- auto-generated: mapping-table -->` 标记段内的 markdown 表格。
+ *
+ * ⚠️ 与 `dbSkeleton` 的 `// → API:` 注释同源但**方向相反**：
+ * - `// → API:`：表 → API field 列表（供反查影响哪些 API）
+ * - 本表：API field → 数据表（供填充时知道每个 API 需要哪张表）
+ *
+ * @param rows 按 field 排序的 { field, type, table } 数组
+ */
+export function mockSpecMappingTable(
+  rows: Array<{ field: string; type: "query" | "mutation"; table: string }>,
+): string {
+  const block = rows
+    .sort((a, b) => a.field.localeCompare(b.field))
+    .map(
+      (r) =>
+        `| \`${r.field}\` | ${r.type === "mutation" ? "Mutation" : "Query"} | \`${r.table}\` |  |`,
+    )
+    .join("\n");
+  return [
+    "| API 操作 | 类型 | 需要的数据表 | 说明 |",
+    "|----------|------|------------|------|",
+    block,
   ].join("\n");
 }
 

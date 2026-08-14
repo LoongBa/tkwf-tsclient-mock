@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { generate, parseModel } from "./generate";
 import { scenariosSkeleton } from "./templates";
+import { genMockHandlers } from "./index";
 
 const fixturePath = fileURLToPath(new URL("./__fixtures__/sample.g.ts", import.meta.url));
 const fixture = readFileSync(fixturePath, "utf-8");
@@ -88,6 +89,56 @@ describe("generate", () => {
     expect(result.dtoCount).toBe(2);
   });
 
+  describe("--mock-spec（v1.3.0）", () => {
+    const outMockPath = fixturePath.replace("sample.g.ts", "sample.mock.g.ts");
+    const specPath = fixturePath.replace("sample.g.ts", "MOCK_SPEC.md");
+
+    it("generate 返回 mockSpecContent（请求时）", () => {
+      const result = generate(fixture, fixturePath, outMockPath, { mockSpecPath: specPath });
+      expect(result.mockSpecContent).toBeDefined();
+      expect(result.mockSpecContent).toContain("<!-- auto-generated: mapping-table -->");
+      expect(result.mockSpecContent).toContain("<!-- end-auto-generated -->");
+      expect(result.mockSpecContent).toContain("| `createPaymentLog` | Mutation | `paymentLogs` |  |");
+      expect(result.mockSpecContent).toContain("| `paymentLogs` | Query | `paymentLogs` |  |");
+    });
+
+    it("genMockHandlers 幂等替换标记段，保留手写内容", async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "mockgen-spec-"));
+      try {
+        const inPath = join(tmpDir, "ts-client.g.ts");
+        const outPath = join(tmpDir, "ts-client.mock.g.ts");
+        const specPathTmp = join(tmpDir, "MOCK_SPEC.md");
+        copyFileSync(fixturePath, inPath);
+
+        // 写入带标记段和手写内容的文件
+        writeFileSync(
+          specPathTmp,
+          [
+            "# Mock 数据规格",
+            "",
+            "<!-- auto-generated: mapping-table -->",
+            "OLD",
+            "<!-- end-auto-generated -->",
+            "",
+            "## 二、数据策略",
+            "手写内容保持不变",
+          ].join("\n"),
+          "utf-8",
+        );
+
+        genMockHandlers(inPath, outPath, specPathTmp);
+
+        const updated = readFileSync(specPathTmp, "utf-8");
+        expect(updated).toContain("| `createPaymentLog`");
+        expect(updated).not.toContain("OLD");
+        expect(updated).toContain("## 二、数据策略");
+        expect(updated).toContain("手写内容保持不变");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("parseModel 返回正确结构的中间模型", () => {
     const model = parseModel(fixture);
     expect(model.parsedDoc.fields.length).toBeGreaterThan(0);
@@ -115,6 +166,18 @@ describe("generate", () => {
   it("生成产物导入 ScenarioConfig 类型", () => {
     const result = generate(fixture, fixturePath, fixturePath.replace("sample.g.ts", "sample.mock.g.ts"));
     expect(result.content).toContain('import type { MockHandler, ScenarioConfig, MockDb } from "@tkwf/tsclient-mock"');
+  });
+
+  it("createMockDb 表名生成 // → API: 反向引用注释", () => {
+    const result = generate(fixture, fixturePath, fixturePath.replace("sample.g.ts", "sample.mock.g.ts"));
+    // paymentLogs 表被多个 API 使用
+    expect(result.content).toMatch(
+      /paymentLogs: \[\].*\/\/ → API: createPaymentLog, deletePaymentLog, paymentLog, paymentLogs, updatePaymentLog/,
+    );
+    // scenarios default 数据集也有注释
+    expect(result.content).toMatch(
+      /definePaymentLog\.makeN\(5\),\s*\/\/ → API: createPaymentLog/,
+    );
   });
 
   it("scenariosSkeleton 对无实体类型表执行 satisfies 降级（不输出 satisfies unknown[]）", () => {

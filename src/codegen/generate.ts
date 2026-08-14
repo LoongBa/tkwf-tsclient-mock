@@ -32,10 +32,16 @@ export function parseModel(source: string): CodegenModel {
  * @param inputPath 源文件路径（用于推导 import 相对路径）
  * @param outputPath 输出文件路径（用于推导 import 相对路径）
  */
-export function generate(source: string, inputPath: string, outputPath: string): {
+export function generate(
+  source: string,
+  inputPath: string,
+  outputPath: string,
+  options?: { mockSpecPath?: string },
+): {
   content: string;
   fieldCount: number;
   dtoCount: number;
+  mockSpecContent?: string;
 } {
   const model = parseModel(source);
   const { serviceMethods, dtoSchemas } = model;
@@ -71,7 +77,9 @@ export function generate(source: string, inputPath: string, outputPath: string):
   for (const [table, entityType] of Object.entries(tableToTypes)) {
     tableInits[table] = entityType;
   }
-  lines.push(tpl.dbSkeleton(tableInits));
+  // 反向索引：表 → 使用该表的 API field 列表（供 dbSkeleton 生成注释）
+  const tableToFields = collectTableFields(serviceMethods);
+  lines.push(tpl.dbSkeleton(tableInits, tableToFields));
 
   // DTO schema 常量（提前声明：XxxSchema 先于 defineXxx、先于 scenarios）
   const dtoBlocks = Object.entries(dtoSchemas).map(([name, schema]) => ({
@@ -85,7 +93,7 @@ export function generate(source: string, inputPath: string, outputPath: string):
 
   // 场景数据集骨架（v2.0.0：default 调用 defineXxx.makeN() 预填充）
   const dtoNames = Object.keys(dtoSchemas);
-  lines.push(tpl.scenariosSkeleton(tableInits, dtoNames));
+  lines.push(tpl.scenariosSkeleton(tableInits, dtoNames, tableToFields));
   lines.push(tpl.scenarioOverridesSkeleton());
 
   // 运行时校验骨架（v1.4.0）
@@ -112,11 +120,49 @@ export function generate(source: string, inputPath: string, outputPath: string):
   lines.push(tpl.assertAllFieldsCovered());
 
   const content = lines.join("\n");
-  return {
+  const result: {
+    content: string;
+    fieldCount: number;
+    dtoCount: number;
+    mockSpecContent?: string;
+  } = {
     content,
     fieldCount: serviceMethods.length,
     dtoCount: Object.keys(dtoSchemas).length,
   };
+
+  // v1.3.0: --mock-spec — 生成 MOCK_SPEC.md 的 API → 数据表映射表
+  if (options?.mockSpecPath) {
+    result.mockSpecContent = buildMockSpecMapping(model);
+  }
+
+  return result;
+}
+
+/**
+ * 构建 MOCK_SPEC.md 的映射表内容（API → 数据表）。
+ * 从 serviceMethods 构建 field → { type, table }，与 `// → API:` 注释同源。
+ */
+function buildMockSpecMapping(model: CodegenModel): string {
+  // 从 parsedDoc.fields 获取 authoritative 的 field → type（query/mutation）
+  const fieldTypeMap = new Map<string, "query" | "mutation">();
+  for (const f of model.parsedDoc.fields) {
+    fieldTypeMap.set(f.name, f.type);
+  }
+
+  const rows: Array<{ field: string; type: "query" | "mutation"; table: string }> = [];
+  for (const method of model.serviceMethods) {
+    const type = fieldTypeMap.get(method.name) ?? "query";
+    const table = entityTypeToTableName(method.entityType);
+    rows.push({ field: method.name, type, table });
+  }
+
+  const tableBody = tpl.mockSpecMappingTable(rows);
+  return [
+    "<!-- auto-generated: mapping-table -->",
+    tableBody,
+    "<!-- end-auto-generated -->",
+  ].join("\n");
 }
 
 /**
@@ -197,6 +243,26 @@ function collectTables(serviceMethods: ServiceMethod[]): Record<string, string> 
     if (!entityType) continue;
     const table = entityTypeToTableName(entityType);
     result[table] = entityType;
+  }
+  return result;
+}
+
+/**
+ * 收集反向索引：表名 → 使用该表的所有 API field 名列表。
+ * 供 dbSkeleton 生成注释，指示 Agent 该表的数据影响哪些 API。
+ */
+function collectTableFields(serviceMethods: ServiceMethod[]): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const method of serviceMethods) {
+    const entityType = method.entityType;
+    if (!entityType) continue;
+    const table = entityTypeToTableName(entityType);
+    if (!result[table]) result[table] = [];
+    result[table].push(method.name);
+  }
+  // 排序稳定输出
+  for (const fields of Object.values(result)) {
+    fields.sort();
   }
   return result;
 }
