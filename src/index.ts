@@ -72,3 +72,16 @@ export type {
 
 export { mockFieldSchemaToZod, validateWithZod } from "./zod.js";
 export type { ValidateIssue, ValidateWithZodResult } from "./zod.js";
+
+// ── MockDataSpec 规则驱动生成 + DatasetSeed I/O（v1.4.0，浏览器安全） ──
+export { parseMockDataSpec, generateFromSpec, serializeDatasetSeed, parseDatasetSeed } from "./mock-data-spec.js";
+export type {
+  MockDataSpec,
+  MockEntitySpec,
+  MockFieldRule,
+  MockComputeExpr,
+  MockRelationDef,
+  MockScenarioDef,
+  MockValidation,
+  GenerateFromSpecOptions,
+} from "./mock-data-spec.js";

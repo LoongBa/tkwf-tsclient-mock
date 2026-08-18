@@ -9,3 +9,6 @@ export { MockHttpServer } from "./http-mock/server.js";
 export type { MockHttpServerOptions } from "./http-mock/server.js";
 
 export { FileRecordingStore } from "./file-recording-store.js";
+
+// ── DatasetSeed / MockDataSpec 文件 I/O（v1.4.0，Node-only） ──
+export { exportDatasetSeed, importDatasetSeed, loadMockDataSpec } from "./dataset-io.js";

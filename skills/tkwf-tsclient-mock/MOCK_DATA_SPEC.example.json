@@ -1,0 +1,85 @@
+{
+  "$schema": "https://tkwf.dev/mock-data-spec.v1.json",
+  "version": 1,
+  "locale": "zh_CN",
+  "seed": 42,
+  "entities": {
+    "StoreInfo": {
+      "count": 5,
+      "fields": {
+        "Id": { "kind": "number", "strategy": "sequence", "start": 1 },
+        "Uid": { "kind": "string", "strategy": "uuid" },
+        "Name": { "kind": "string", "strategy": "faker", "fakerMethod": "company.name" }
+      }
+    },
+    "PaymentLog": {
+      "count": 50,
+      "strict": false,
+      "fields": {
+        "Id": { "kind": "number", "strategy": "sequence", "start": 1 },
+        "UId": { "kind": "string", "strategy": "uuid" },
+        "StoreUid": { "kind": "string", "strategy": "ref", "ref": "StoreInfo.Uid" },
+        "StoreName": { "kind": "string", "strategy": "faker", "fakerMethod": "company.name" },
+        "ProjectName": { "kind": "string", "strategy": "faker", "fakerMethod": "commerce.productName" },
+        "PaymentTime": {
+          "kind": "date",
+          "strategy": "dateRange",
+          "between": ["2026-01-01", "2026-08-16"]
+        },
+        "TotalAmount": {
+          "kind": "number",
+          "strategy": "range",
+          "min": 100, "max": 99999,
+          "distribution": "uniform"
+        },
+        "DiscountAmount": {
+          "kind": "number",
+          "strategy": "range",
+          "min": 0, "max": 100,
+          "nullable": { "weight": 0.3 }
+        },
+        "ActualAmount": {
+          "kind": "number",
+          "strategy": "computed",
+          "compute": {
+            "op": "subtract",
+            "operands": [
+              { "field": "TotalAmount" },
+              { "expr": { "op": "coalesce", "operands": [{ "field": "DiscountAmount" }, { "literal": 0 }] } }
+            ]
+          }
+        },
+        "PaymentMethod": {
+          "kind": "enum",
+          "strategy": "enum",
+          "values": ["WeChat", "Alipay", "Cash", "Card"],
+          "distribution": "weighted",
+          "weights": [0.45, 0.35, 0.15, 0.05]
+        },
+        "PaymentStatus": {
+          "kind": "enum",
+          "strategy": "enum",
+          "values": ["Paid", "Unpaid", "Refunded", "Failed"],
+          "distribution": "weighted",
+          "weights": [0.7, 0.15, 0.1, 0.05]
+        },
+        "OrderPerson": { "kind": "string", "strategy": "faker", "fakerMethod": "person.fullName" },
+        "BillNumber": { "kind": "string", "strategy": "pattern", "pattern": "BILL-####" }
+      },
+      "relations": [
+        {
+          "type": "belongsTo",
+          "field": "StoreUid",
+          "targetEntity": "StoreInfo",
+          "targetField": "Uid",
+          "generate": true
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "default": { "PaymentLog": { "count": 50 }, "StoreInfo": { "count": 5 } },
+    "empty": { "PaymentLog": { "count": 0 }, "StoreInfo": { "count": 0 } },
+    "minimal": { "PaymentLog": { "count": 3 }, "StoreInfo": { "count": 1 } }
+  }
+}

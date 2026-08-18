@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tkwf.dev/mock-data-spec.v1.json",
+  "title": "MockDataSpec",
+  "description": "语言无关的 mock 数据规则模板，描述生成什么数据、怎么生成",
+  "type": "object",
+  "required": ["version", "entities"],
+  "properties": {
+    "$schema": { "type": "string", "description": "JSON Schema URI" },
+    "version": { "const": 1, "description": "格式版本，当前仅支持 1" },
+    "locale": { "type": "string", "description": "faker locale（如 zh_CN）" },
+    "seed": { "type": "integer", "description": "随机种子（确定性生成）" },
+    "entities": {
+      "type": "object",
+      "description": "实体规则",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/entitySpec" }
+    },
+    "scenarios": {
+      "type": "object",
+      "description": "场景定义",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": { "count": { "type": "integer", "minimum": 0 } },
+          "required": ["count"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entitySpec": {
+      "type": "object",
+      "required": ["count", "fields"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "strict": { "type": "boolean" },
+        "fields": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/fieldRule" }
+        },
+        "relations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relationDef" }
+        }
+      }
+    },
+    "fieldRule": {
+      "type": "object",
+      "required": ["kind", "strategy"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["string", "number", "boolean", "date", "enum"] },
+        "strategy": { "type": "string" },
+        "distribution": { "type": "string", "enum": ["uniform", "weighted", "gaussian", "cyclic"] },
+        "weights": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "nullable": { "type": "object", "properties": { "weight": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["weight"] },
+        "validation": { "$ref": "#/$defs/validation" },
+        "start": { "type": "integer" },
+        "ref": { "type": "string" },
+        "fakerMethod": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "between": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
+        "pattern": { "type": "string" },
+        "value": {},
+        "samples": { "type": "array" },
+        "values": { "type": "array", "items": { "type": ["string", "number"] } },
+        "compute": { "$ref": "#/$defs/computeExpr" }
+      }
+    },
+    "computeExpr": {
+      "type": "object",
+      "required": ["op", "operands"],
+      "properties": {
+        "op": { "type": "string", "enum": ["add", "subtract", "multiply", "divide", "coalesce"] },
+        "operands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field": { "type": "string" },
+              "literal": { "type": ["number", "string"] },
+              "expr": { "$ref": "#/$defs/computeExpr" }
+            }
+          }
+        }
+      }
+    },
+    "relationDef": {
+      "type": "object",
+      "required": ["type", "field", "targetEntity", "targetField"],
+      "properties": {
+        "type": { "const": "belongsTo" },
+        "field": { "type": "string" },
+        "targetEntity": { "type": "string" },
+        "targetField": { "type": "string" },
+        "generate": { "type": "boolean" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "regex": { "type": "string" },
+        "unique": { "type": "boolean" },
+        "notEmpty": { "type": "boolean" },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    }
+  }
+}

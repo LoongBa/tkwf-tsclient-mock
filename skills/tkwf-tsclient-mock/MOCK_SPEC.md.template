@@ -76,3 +76,21 @@ gen-mock-handlers --mock-spec <本文件路径>                     # ④ 更新
 2. `--mock-spec` 幂等更新本文件第一节的 API 映射表
 3. 如果新增了表，补充第二节数据策略、第三节表间关系
 4. 编辑 `src/mock/data.ts` 补充新表的初始数据
+
+---
+
+## 五、MockDataSpec JSON（结构化规则）
+
+> 本文件是人类可读的数据策略文档。**MockDataSpec JSON** 是其机器可读的结构化版本，两侧通过 `generateFromSpec()` 生成数据。
+>
+> 参考文件：
+> - JSON Schema：`skills/tkwf-tsclient-mock/mock-data-spec.schema.json`
+> - 完整示例：`skills/tkwf-tsclient-mock/MOCK_DATA_SPEC.example.json`
+
+填写完本文件的数据策略后，将策略翻译为 MockDataSpec JSON：
+- 第二节的"最少条数" → `entities.<entity>.count`
+- 第二节的"关键字段约束" → `entities.<entity>.fields.<field>.strategy / distribution / min / max`
+- 第三节的表间关系 → `entities.<entity>.relations`
+- 默认场景 count → `scenarios.default`
+
+详情见 `MOCK_DATA_SPEC.example.json`。

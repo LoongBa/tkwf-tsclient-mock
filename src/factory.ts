@@ -1,3 +1,8 @@
+import {
+  EXACT_STRATEGIES, CUSTOM_STRATEGIES, SUFFIX_STRATEGIES, PREFIX_STRATEGIES, REGEX_STRATEGIES,
+} from "./mock-spec/faker-method-map.js";
+import type { CustomStrategyConfig } from "./mock-spec/faker-method-map.js";
+
 /** 运行时字段类型描述符 */
 export interface MockFieldSchema {
   kind: "string" | "number" | "boolean" | "date" | "enum" | "object" | "array";
@@ -94,57 +99,8 @@ function isMockFieldSchema(value: unknown): value is MockFieldSchema {
     && typeof (value as MockFieldSchema).kind === "string";
 }
 
-// ── 字段名→策略映射表（v2.0.0） ──
-
-/** 精确字段名 → 自定义生成器（faker 不擅长的字段） */
-const CUSTOM_STRATEGIES: Record<string, (ctx: GeneratorContext) => unknown> = {
-  amount: (ctx) => numberInRange(ctx, 1, 99999),
-  price: (ctx) => numberInRange(ctx, 10, 9999),
-  total: (ctx) => numberInRange(ctx, 100, 99999),
-  quantity: (ctx) => numberInRange(ctx, 1, 999),
-  discount: (ctx) => numberInRange(ctx, 0, 100) / 100,
-  rate: (ctx) => numberInRange(ctx, 0, 100) / 100,
-  score: (ctx) => numberInRange(ctx, 1, 5),
-  status: (ctx) => cycleNext(ctx, ctx.enums?.[ctx.fieldName] ?? ctx.enumValues ?? []),
-  state: (ctx) => cycleNext(ctx, ctx.enums?.[ctx.fieldName] ?? ctx.enumValues ?? []),
-  level: (ctx) => cycleNext(ctx, ctx.enums?.[ctx.fieldName] ?? ctx.enumValues ?? []),
-  createdAt: (ctx) => advanceDate(ctx),
-  updatedAt: (ctx) => advanceDate(ctx),
-  deletedAt: () => null,
-};
-
-/** 精确字段名 → faker 方法路径 */
-const EXACT_STRATEGIES: Record<string, string> = {
-  name: "person.fullName", userName: "person.fullName", nickname: "person.fullName",
-  contactPerson: "person.fullName", realName: "person.fullName",
-  companyName: "company.name", merchantName: "company.name", storeName: "company.name",
-  brandName: "company.name", merchant: "company.name", company: "company.name",
-  address: "location.streetAddress", deliveryAddress: "location.streetAddress",
-  phone: "phone.number", mobile: "phone.number", telephone: "phone.number",
-  email: "internet.email", mail: "internet.email",
-  city: "location.city", province: "location.state", zipCode: "location.zipCode",
-  description: "lorem.paragraph", remark: "lorem.sentence", note: "lorem.text",
-  title: "lorem.sentence", content: "lorem.paragraphs",
-  url: "internet.url", website: "internet.url", avatar: "image.avatar",
-  productName: "commerce.productName", category: "commerce.department",
-  jobTitle: "person.jobTitle", department: "person.jobArea",
-  store: "company.name", brand: "company.name",
-  createTime: "__date__", updateTime: "__date__",
-};
-
-/** 后缀匹配 */
-const SUFFIX_STRATEGIES: Record<string, string> = {
-  Name: "person.fullName", Address: "location.streetAddress",
-  Phone: "phone.number", Email: "internet.email",
-  Url: "internet.url", Avatar: "image.avatar",
-  Description: "lorem.paragraph", Remark: "lorem.sentence",
-  Note: "lorem.text", Title: "lorem.sentence",
-};
-
-/** 前缀匹配 */
-const PREFIX_STRATEGIES: Record<string, string> = {
-  is: "boolean", has: "boolean",
-};
+// ── 字段名→策略映射表 ──
+// 映射表已抽取至 ./mock-spec/faker-method-map.ts（跨语言共享，.NET Bogus 侧使用同一份映射）
 
 /** 统一字段名解析入口（Oracle 🔴2：CUSTOM → 精确 → 后缀 → 前缀 → 模式匹配） */
 function resolveFieldStrategy(field: string): string | null {
@@ -156,8 +112,9 @@ function resolveFieldStrategy(field: string): string | null {
   for (const [prefix, strategy] of Object.entries(PREFIX_STRATEGIES)) {
     if (field.startsWith(prefix)) return strategy;
   }
-  if (/Time$|At$/.test(field)) return "__date__";
-  if (/Id$/.test(field)) return "__id__";
+  for (const { pattern, method } of REGEX_STRATEGIES) {
+    if (new RegExp(pattern).test(field)) return method;
+  }
   return null;
 }
 
@@ -238,7 +195,23 @@ function generateValue(field: string, schema: MockFieldSchema, depth: number, ct
       return schema.kind === "string" ? `mock-${counter}` : counter;
     }
     if (strategy === "__date__") return advanceDate(ctx);
-    if (strategy && CUSTOM_STRATEGIES[strategy]) return CUSTOM_STRATEGIES[strategy](ctx);
+    const customConfig: CustomStrategyConfig | undefined = strategy
+      ? CUSTOM_STRATEGIES[strategy]
+      : undefined;
+    if (customConfig) {
+      switch (customConfig.strategy) {
+        case "range": {
+          const { min = 0, max = 100 } = customConfig;
+          return numberInRange(ctx, min, max);
+        }
+        case "cycle":
+          return cycleNext(ctx, ctx.enums?.[ctx.fieldName] ?? ctx.enumValues ?? []);
+        case "dateAdvance":
+          return advanceDate(ctx);
+        case "null":
+          return null;
+      }
+    }
     if (strategy) return applyFakerMethod(strategy, ctx);
     return generateByKind(schema, ctx);
   }

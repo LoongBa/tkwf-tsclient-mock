@@ -506,6 +506,104 @@ npm install --save-dev zod@^4
 
 ---
 
+## MockDataSpec 规则驱动生成（v1.4.0）
+
+从语言无关的 `MockDataSpec` JSON 规则模板生成数据，替代手写 `data.ts`。
+
+### MockDataSpec 类型族
+
+`MockDataSpec` 是语言无关的规则模板，描述"生成什么数据、怎么生成"。新增独立类型族，与 `MockFieldSchema`（类型描述符）关注点分离：
+
+| 类型 | 职责 | 维护者 |
+|------|------|--------|
+| `MockDataSpec` | 顶层规则：version/locale/seed/entities/scenarios | 人工/skill 编写 |
+| `MockEntitySpec` | 实体级规则：count/strict/fields/relations | 人工/skill 编写 |
+| `MockFieldRule` | 字段级生成策略：kind/strategy/distribution/nullable/compute | 人工/skill 编写 |
+| `MockFieldSchema` | 字段类型描述符（codegen 产物） | 自动生成 |
+
+### 快速开始
+
+```typescript
+import { parseMockDataSpec, generateFromSpec } from "@tkwf/tsclient-mock";
+import { createMockDb } from "@tkwf/tsclient-mock";
+import { fakerZH_CN } from "@faker-js/faker";
+
+// 1. 加载规则
+const spec = parseMockDataSpec(jsonString);
+
+// 2. 生成数据
+const seed = generateFromSpec(spec, { faker: fakerZH_CN });
+
+// 3. 加载到内存数据库
+const db = createMockDb({});
+db.buildDataset(seed);
+```
+
+### 生成策略
+
+| strategy | 语义 | 示例 |
+|----------|------|------|
+| `sequence` | 自增序列 | `start: 1` → 1, 2, 3... |
+| `uuid` | UUID | 自动生成 UUID 字符串 |
+| `ref` | 引用其他实体 FK | `ref: "StoreInfo.Uid"` |
+| `faker` | faker 方法生成 | `fakerMethod: "company.name"` |
+| `range` | 数值范围 | `min: 100, max: 99999` |
+| `dateRange` | 日期范围 | `between: ["2026-01-01", "2026-08-16"]` |
+| `pattern` | 模式字符串 | `pattern: "BILL-####"` |
+| `computed` | 计算字段 | `compute: { op: "subtract", operands: [...] }` |
+| `constant` | 固定值 | `value: "fixed"` |
+| `sample` | 从样本集随机选取 | `samples: ["A", "B", "C"]` |
+| `enum` | 枚举值 | `values: ["A", "B"], distribution: "weighted"` |
+
+### 分布类型
+
+| distribution | 语义 | 适用策略 |
+|-------------|------|---------|
+| `uniform` | 均匀分布（默认） | range, enum |
+| `weighted` | 加权离散分布 | enum（配合 `weights`） |
+| `gaussian` | 正态分布（首版降级为 uniform） | range |
+| `cyclic` | 轮询（确定性） | enum |
+
+### computed 表达式
+
+安全求值，无 eval。仅支持结构化运算符：
+
+```typescript
+{
+  "op": "subtract",
+  "operands": [
+    { "field": "TotalAmount" },
+    { "expr": { "op": "coalesce", "operands": [{ "field": "DiscountAmount" }, { "literal": 0 }] } }
+  ]
+}
+// 等价于：TotalAmount - (DiscountAmount ?? 0)
+```
+
+### 导入导出
+
+```typescript
+import { serializeDatasetSeed, parseDatasetSeed } from "@tkwf/tsclient-mock";
+// Node-only:
+import { exportDatasetSeed, importDatasetSeed, loadMockDataSpec } from "@tkwf/tsclient-mock/server";
+
+// 序列化
+const json = serializeDatasetSeed(seed, { pretty: true });
+
+// 解析
+const seed = parseDatasetSeed(json);
+
+// 文件 I/O（Node-only）
+exportDatasetSeed(db, ["paymentLogs", "storeInfos"], "seed.json");
+importDatasetSeed(db, "seed.json");
+const spec = loadMockDataSpec("mock-data-spec.json");
+```
+
+### faker 方法映射表外置
+
+字段名→faker 方法的映射表从 `factory.ts` 硬编码提取为 `faker-method-map.json`，位于 `src/mock-spec/faker-method-map.json`。.NET 侧（Bogus）可加载同一 JSON 实现跨语言一致性。
+
+---
+
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
@@ -519,6 +617,7 @@ npm install --save-dev zod@^4
 | **v1.2.0** | 场景切换（setScenario）+ 分阶段策略 | ✅ |
 | **v1.2.2** | 策略化数据生成（realistic/minimal）+ 关联数据生成（_relations）+ 全部历史能力汇总（含录制回放/zod 校验/关联过滤/HTTP server/工厂 DSL） | ✅ |
 | **v1.3.0** | **Mock Agent 支撑**：`createMockDb` 反向注释（`// → API:`）+ `gen-mock-handlers --mock-spec` + MOCK_SPEC.md 模板 + `tkwf-tsclient-mock` skill | ✅ 当前版本 |
+| **v1.4.0** | **MockDataSpec 规则驱动生成**：`MockDataSpec` 类型族 + `generateFromSpec()` + `parseMockDataSpec()` + `serializeDatasetSeed()`/`parseDatasetSeed()` + `exportDatasetSeed()`/`importDatasetSeed()` + faker 方法映射表外置 + skill 四步工作流 | ✅ 本版本 |
 | ~~历史 tag~~ | v1.3.0–v1.9.0 旧历史开发 tag（录制回放/zod/查询增强/关联过滤/双向同步/HTTP server/工厂 DSL） | 已并入 v1.2.2 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。

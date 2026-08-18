@@ -1,0 +1,64 @@
+// Field name → faker method mapping tables
+// Extracted from factory.ts for cross-language sharing (.NET Bogus side uses same mapping)
+
+export const EXACT_STRATEGIES: Record<string, string> = {
+  name: "person.fullName", userName: "person.fullName", nickname: "person.fullName",
+  contactPerson: "person.fullName", realName: "person.fullName",
+  companyName: "company.name", merchantName: "company.name", storeName: "company.name",
+  brandName: "company.name", merchant: "company.name", company: "company.name",
+  address: "location.streetAddress", deliveryAddress: "location.streetAddress",
+  phone: "phone.number", mobile: "phone.number", telephone: "phone.number",
+  email: "internet.email", mail: "internet.email",
+  city: "location.city", province: "location.state", zipCode: "location.zipCode",
+  description: "lorem.paragraph", remark: "lorem.sentence", note: "lorem.text",
+  title: "lorem.sentence", content: "lorem.paragraphs",
+  url: "internet.url", website: "internet.url", avatar: "image.avatar",
+  productName: "commerce.productName", category: "commerce.department",
+  jobTitle: "person.jobTitle", department: "person.jobArea",
+  store: "company.name", brand: "company.name",
+  createTime: "__date__", updateTime: "__date__",
+};
+
+export interface CustomStrategyConfig {
+  strategy: "range" | "cycle" | "dateAdvance" | "null";
+  min?: number;
+  max?: number;
+}
+
+export const CUSTOM_STRATEGIES: Record<string, CustomStrategyConfig> = {
+  amount: { strategy: "range", min: 1, max: 99999 },
+  price: { strategy: "range", min: 10, max: 9999 },
+  total: { strategy: "range", min: 100, max: 99999 },
+  quantity: { strategy: "range", min: 1, max: 999 },
+  discount: { strategy: "range", min: 0, max: 100 },
+  rate: { strategy: "range", min: 0, max: 100 },
+  score: { strategy: "range", min: 1, max: 5 },
+  status: { strategy: "cycle" },
+  state: { strategy: "cycle" },
+  level: { strategy: "cycle" },
+  createdAt: { strategy: "dateAdvance" },
+  updatedAt: { strategy: "dateAdvance" },
+  deletedAt: { strategy: "null" },
+};
+
+export const SUFFIX_STRATEGIES: Record<string, string> = {
+  Name: "person.fullName", Address: "location.streetAddress",
+  Phone: "phone.number", Email: "internet.email",
+  Url: "internet.url", Avatar: "image.avatar",
+  Description: "lorem.paragraph", Remark: "lorem.sentence",
+  Note: "lorem.text", Title: "lorem.sentence",
+};
+
+export const PREFIX_STRATEGIES: Record<string, string> = {
+  is: "boolean", has: "boolean",
+};
+
+export interface RegexStrategy {
+  pattern: string;
+  method: string;
+}
+
+export const REGEX_STRATEGIES: RegexStrategy[] = [
+  { pattern: "Time$|At$", method: "__date__" },
+  { pattern: "Id$", method: "__id__" },
+];
