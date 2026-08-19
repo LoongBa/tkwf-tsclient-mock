@@ -1,5 +1,6 @@
 {
   "$schema": "https://tkwf.dev/mock-data-spec.v1.json",
+  "$comment": "⚠️ scenarios 字段仅供人类阅读，generateFromSpec 不消费。运行时场景切换用 createScenarioContext。",
   "version": 1,
   "locale": "zh_CN",
   "seed": 42,

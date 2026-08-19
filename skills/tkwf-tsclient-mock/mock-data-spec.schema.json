@@ -51,7 +51,10 @@
       "required": ["kind", "strategy"],
       "properties": {
         "kind": { "type": "string", "enum": ["string", "number", "boolean", "date", "enum"] },
-        "strategy": { "type": "string" },
+        "strategy": {
+          "type": "string",
+          "enum": ["sequence", "uuid", "ref", "faker", "range", "dateRange", "pattern", "computed", "constant", "sample", "enum"]
+        },
         "distribution": { "type": "string", "enum": ["uniform", "weighted", "gaussian", "cyclic"] },
         "weights": { "type": "array", "items": { "type": "number", "minimum": 0 } },
         "nullable": { "type": "object", "properties": { "weight": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["weight"] },
@@ -67,7 +70,45 @@
         "samples": { "type": "array" },
         "values": { "type": "array", "items": { "type": ["string", "number"] } },
         "compute": { "$ref": "#/$defs/computeExpr" }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "strategy": { "const": "dateRange" } } },
+          "then": { "properties": { "kind": { "const": "date" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "range" } } },
+          "then": { "properties": { "kind": { "const": "number" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "sequence" } } },
+          "then": { "properties": { "kind": { "const": "number" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "enum" } } },
+          "then": { "properties": { "kind": { "const": "enum" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "faker" } } },
+          "then": { "properties": { "kind": { "const": "string" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "pattern" } } },
+          "then": { "properties": { "kind": { "const": "string" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "uuid" } } },
+          "then": { "properties": { "kind": { "const": "string" } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "ref" } } },
+          "then": { "properties": { "kind": { "enum": ["string", "number"] } } }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "computed" } } },
+          "then": { "properties": { "kind": { "enum": ["string", "number"] } } }
+        }
+      ]
     },
     "computeExpr": {
       "type": "object",

@@ -478,16 +478,16 @@ function createStringGenerator(
   const fakerPath = rule.fakerMethod ?? (rule.strategy.includes(".") ? rule.strategy : undefined);
   if (fakerPath !== undefined && faker !== undefined) {
     const segments = fakerPath.split(".");
-    return () => {
+    return (ctx) => {
       const value = callFakerMethod(faker, segments);
       if (value !== undefined && value !== null) return value;
-      return fallbackString(field, rule);
+      return fallbackString(ctx, field, rule);
     };
   }
   if (rule.pattern !== undefined) {
-    return () => patternedString(rule.pattern ?? "");
+    return (ctx) => patternedString(ctx, rule.pattern ?? "");
   }
-  return () => fallbackString(field, rule);
+  return (ctx) => fallbackString(ctx, field, rule);
 }
 
 // ── 辅助：随机 / 权重 / faker ──
@@ -526,22 +526,22 @@ function callFakerMethod(faker: Record<string, unknown>, segments: string[]): un
   return raw !== undefined && raw !== null ? String(raw) : undefined;
 }
 
-function fallbackString(field: string, rule: MockFieldRule): string {
+function fallbackString(ctx: GeneratorContext, field: string, rule: MockFieldRule): string {
   const pool = rule.samples ?? rule.values;
   if (pool !== undefined && pool.length > 0) return String(pool[0]);
-  if (rule.pattern !== undefined && rule.pattern !== "") return patternedString(rule.pattern);
+  if (rule.pattern !== undefined && rule.pattern !== "") return patternedString(ctx, rule.pattern);
   return `mock-${field}`;
 }
 
-/** 轻量 pattern 填充：#=数字 X=大写字母 x=小写字母，其余字符原样保留 */
-function patternedString(pattern: string): string {
+/** 轻量 pattern 填充：#=数字 X=大写字母 x=小写字母，其余字符原样保留。使用确定性 LCG，同 seed 可复现。 */
+function patternedString(ctx: GeneratorContext, pattern: string): string {
   const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const lower = upper.toLowerCase();
   let output = "";
   for (const char of pattern) {
-    if (char === "#") output += Math.floor(Math.random() * 10);
-    else if (char === "X") output += upper[Math.floor(Math.random() * upper.length)];
-    else if (char === "x") output += lower[Math.floor(Math.random() * lower.length)];
+    if (char === "#") output += Math.floor(random01(ctx) * 10);
+    else if (char === "X") output += upper[Math.floor(random01(ctx) * upper.length)];
+    else if (char === "x") output += lower[Math.floor(random01(ctx) * lower.length)];
     else output += char;
   }
   return output;

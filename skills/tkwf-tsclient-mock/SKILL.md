@@ -46,7 +46,7 @@
    - 修正字段 `strategy`（faker / range / dateRange / weighted / ...）
    - 填 `distribution` / `weights`（分布）
    - 填 `relations`（FK 引用）
-   - 填 `scenarios`（default / empty / minimal）
+   - 填 `scenarios`（default / empty / minimal）⚠️ **仅供人类阅读**——`generateFromSpec` 不消费 scenarios，运行时场景切换用 `createScenarioContext`
    - 校验：`mock-data-spec.schema.json` 描述了 JSON Schema 约束
 
 ### Step 3：生成与验证
@@ -108,3 +108,33 @@
 - `empty`：空表（验证空态 UI）
 - `error`：注入错误（验证错误提示）
 - `loading`：长延迟（验证加载状态）
+
+### ref 策略 vs belongsTo 关系：何时用哪个
+
+| 场景 | 用 ref | 用 belongsTo relation |
+|------|--------|----------------------|
+| 单个 FK 字段引用父实体 ID | ✅ `ref: "StoreInfo.Uid"` | 也可用（但 ref 更简洁） |
+| 多个字段需对齐同一父行（如 storeUid + storeName） | ❌ 各自独立随机，永远无法对齐 | ✅ 多条 relation 指向同一 targetEntity，轮询同步 |
+| 字段值从父实体某字段取值（非 ID） | ✅ `ref: "StoreInfo.Name"` | ✅ `relation.targetField: "Name"` |
+
+**规则**：`ref` 策略用 `random01` 独立随机取样，各自独立；`belongsTo` 用 `offset % pool.length` 轮询顺序分配，同父多字段天然对齐。
+
+### 浏览器端如何使用 MockDataSpec
+
+`generateFromSpec` 和 `parseMockDataSpec` 是浏览器安全的（主入口导出），但 `loadMockDataSpec`（读文件）是 Node-only（`/server` 子路径）。
+
+**浏览器端部署步骤**：
+1. 在 Node 环境（如 build 脚本）用 `loadMockDataSpec` 读取 spec JSON
+2. 调用 `generateFromSpec` 生成 DatasetSeed
+3. 用 `serializeDatasetSeed` 序列化为 JSON 字符串
+4. 将 JSON 写入 TS 模块文件（如 `src/mock/spec-seed.g.ts`）：
+   ```typescript
+   // 自动生成——由 scripts/gen-mock-spec-seed.ts 生成
+   import type { DatasetSeed } from "@tkwf/tsclient-mock";
+   export const specSeed: DatasetSeed = { ... };
+   ```
+5. 浏览器端直接 `import { specSeed } from "./spec-seed.g"` 并 `db.buildDataset(specSeed)`
+
+### 包装/分页响应（Connection）不在 MockDataSpec 范围内
+
+`generateFromSpec` 返回平坦的 `DatasetSeed = Record<string, T[]>`，不包含分页/Connection 包装结构（如 `{ items, page, total }`）。这些包装由 `createMockDb.query()` 运行时自动组装。如果消费端需要包装表数据，需在 `data.ts` 中手写或通过 `db.query()` 组装。跨语言交换时，目标语言也需自行组装包装结构。
