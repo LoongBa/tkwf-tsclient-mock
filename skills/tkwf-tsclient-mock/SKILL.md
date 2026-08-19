@@ -190,6 +190,31 @@ db.buildDataset(seed, { unknownTables: "warn" });
 - `error`：注入错误（验证错误提示）
 - `loading`：长延迟（验证加载状态）
 
+### 登录数据（loginPayloads）形状必须与主包 selection 对齐
+
+`DomainClientUser.loginAs()` / `loginBySms()` / `loginByContext()` 的 SDK selection 固定为**平铺字段**：
+
+```
+success userName displayName sessionKey accessToken refreshToken expiresAt deviceId
+```
+
+填 `initial-data.ts` 中登录相关表（如 `loginPayloads`）时，**必须使用平铺结构**，不要嵌套：
+
+```jsonc
+// ✅ 正确——平铺字段，含 success + sessionKey
+{ "success": true, "sessionKey": "mock-session", "userName": "张三", "displayName": "张三" }
+
+// ❌ 错误——嵌套 user 对象 + 缺 sessionKey，主包读不到
+{ "success": true, "accessToken": "...", "user": { "uId": "MEM001", "nickname": "张三" } }
+```
+
+**为什么致命**：
+- `success` 缺失 → 登录状态不更新（🔴）
+- `sessionKey` 缺失 → `persist()` 走 else 分支**清空 sessionStorage** → 刷新后 restore 失败（🔴）
+- `userName` / `displayName` 缺失 → 登录后为 null（🟡）
+
+**最简单的规避**：用 `new MockTransport({ ...defaultSessionHandlers, ...handlers })`——`defaultSessionHandlers` 已返回完整平铺结构（`success: true` + `sessionKey: "mock-session"`），无需手填登录数据。
+
 ### ref 策略 vs belongsTo 关系：何时用哪个
 
 | 场景 | 用 ref | 用 belongsTo relation |
