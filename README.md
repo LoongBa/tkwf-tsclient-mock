@@ -579,6 +579,32 @@ db.buildDataset(seed);
 // 等价于：TotalAmount - (DiscountAmount ?? 0)
 ```
 
+> **v1.5.0 管线顺序**：computed 在 belongsTo 关系填充 FK 之后求值，因此 computed 字段可以引用 relation 填充的 FK 字段（如 `coalesce(storeId, 0)`）。求值顺序：`makeN → applyRelations → applyComputed → applyNullable → collectIds`。computed 按字段声明顺序求值，依赖项需先声明。
+
+### 场景化生成（v1.5.0）
+
+`generateFromSpec(spec, { scenario })` 按 `spec.scenarios[scenario]` 覆盖实体 count（生成期）；未提及的实体保持默认 count：
+
+```json
+{
+  "scenarios": {
+    "default": { "PaymentLog": { "count": 50 }, "StoreInfo": { "count": 5 } },
+    "empty":   { "PaymentLog": { "count": 0 },  "StoreInfo": { "count": 0 } },
+    "minimal": { "PaymentLog": { "count": 3 },  "StoreInfo": { "count": 1 } }
+  }
+}
+```
+
+```typescript
+const spec = parseMockDataSpec(jsonString);
+const minimal = generateFromSpec(spec, { scenario: "minimal" });  // PaymentLog=3, StoreInfo=1
+const empty   = generateFromSpec(spec, { scenario: "empty" });    // 全部 0 条（验证空态 UI）
+```
+
+- **未知场景** → 抛错，错误信息列出可用场景名
+- **count=0** → 实体返回 `[]`，依赖它的子实体 relation 跳过 FK 填充（warn）
+- **运行时场景切换**（数据+注入联动、不重新生成）仍用 `createScenarioContext`——两者正交：`generateFromSpec` 场景参数管"生成什么量"，`createScenarioContext` 管"运行时行为"
+
 ### 导入导出
 
 ```typescript
@@ -607,7 +633,7 @@ const spec = loadMockDataSpec("mock-data-spec.json");
 ## 未来规划（版本路线图）
 
 > 每个版本独立走：开发方案 → 审核 → 开发 → 审核报告 → 提交（见 `docs/迭代开发过程/V{主版本}/`）。
-> 当前实现 = v1.3.0 内容。
+> 当前实现 = v1.5.0 内容。
 > **历史版本说明**：旧 v1.3.0–v1.9.0 为历史开发 tag（未独立发布，已并入 v1.2.2）；当前 v1.3.0 为全新发布，内容为 Mock Agent 支撑。
 
 | 版本 | 内容 | 说明 |
@@ -616,8 +642,9 @@ const spec = loadMockDataSpec("mock-data-spec.json");
 | **v1.1.0** | codegen 扩展 + AI 编排（validateMock/selfHealing/detectChange） | ✅ |
 | **v1.2.0** | 场景切换（setScenario）+ 分阶段策略 | ✅ |
 | **v1.2.2** | 策略化数据生成（realistic/minimal）+ 关联数据生成（_relations）+ 全部历史能力汇总（含录制回放/zod 校验/关联过滤/HTTP server/工厂 DSL） | ✅ |
-| **v1.3.0** | **Mock Agent 支撑**：`createMockDb` 反向注释（`// → API:`）+ `gen-mock-handlers --mock-spec` + MOCK_SPEC.md 模板 + `tkwf-tsclient-mock` skill | ✅ 当前版本 |
-| **v1.4.0** | **MockDataSpec 规则驱动生成**：`MockDataSpec` 类型族 + `generateFromSpec()` + `parseMockDataSpec()` + `serializeDatasetSeed()`/`parseDatasetSeed()` + `exportDatasetSeed()`/`importDatasetSeed()` + faker 方法映射表外置 + skill 四步工作流 | ✅ 本版本 |
+| **v1.3.0** | **Mock Agent 支撑**：`createMockDb` 反向注释（`// → API:`）+ `gen-mock-handlers --mock-spec` + MOCK_SPEC.md 模板 + `tkwf-tsclient-mock` skill | ✅ |
+| **v1.4.0** | **MockDataSpec 规则驱动生成**：`MockDataSpec` 类型族 + `generateFromSpec()` + `parseMockDataSpec()` + `serializeDatasetSeed()`/`parseDatasetSeed()` + `exportDatasetSeed()`/`importDatasetSeed()` + faker 方法映射表外置 + skill 四步工作流 + schema 策略枚举约束 | ✅ |
+| **v1.5.0** | **场景化生成 + computed 管线修正**：`generateFromSpec(spec, { scenario })` 场景覆盖 count + computed 移至 relations 之后（可引用 FK 字段）+ parse 场景实体名校验 | ✅ 当前版本 |
 | ~~历史 tag~~ | v1.3.0–v1.9.0 旧历史开发 tag（录制回放/zod/查询增强/关联过滤/双向同步/HTTP server/工厂 DSL） | 已并入 v1.2.2 |
 
 主包 `@tkwf/tsclient` v1.1.0：`DomainHostClientOptions.transport` 注入点（另一仓库，独立迭代）。

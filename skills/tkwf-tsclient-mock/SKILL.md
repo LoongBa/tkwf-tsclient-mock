@@ -46,7 +46,7 @@
    - 修正字段 `strategy`（faker / range / dateRange / weighted / ...）
    - 填 `distribution` / `weights`（分布）
    - 填 `relations`（FK 引用）
-   - 填 `scenarios`（default / empty / minimal）⚠️ **仅供人类阅读**——`generateFromSpec` 不消费 scenarios，运行时场景切换用 `createScenarioContext`
+   - 填 `scenarios`（default / empty / minimal）——v1.5.0 起 `generateFromSpec(spec, { scenario })` 会按场景覆盖实体 count；运行时场景切换（数据+注入联动）仍用 `createScenarioContext`
    - 校验：`mock-data-spec.schema.json` 描述了 JSON Schema 约束
 
 ### Step 3：生成与验证

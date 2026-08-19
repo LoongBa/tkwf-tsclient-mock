@@ -91,6 +91,6 @@ gen-mock-handlers --mock-spec <本文件路径>                     # ④ 更新
 - 第二节的"最少条数" → `entities.<entity>.count`
 - 第二节的"关键字段约束" → `entities.<entity>.fields.<field>.strategy / distribution / min / max`
 - 第三节的表间关系 → `entities.<entity>.relations`
-- 默认场景 count → `scenarios.default` ⚠️ **仅供人类阅读**——`generateFromSpec` 不消费 scenarios，运行时场景切换用 `createScenarioContext`
+- 默认场景 count → `scenarios.default` —— v1.5.0 起 `generateFromSpec(spec, { scenario })` 按场景覆盖 count；运行时场景切换（数据+注入联动）用 `createScenarioContext`
 
 详情见 `MOCK_DATA_SPEC.example.json`。

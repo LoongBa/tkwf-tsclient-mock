@@ -8,7 +8,7 @@
  * 1. 按 relation（belongsTo）对实体做拓扑排序（Kahn 算法），确保父实体先于子实体生成；
  * 2. 每个实体按字段规则构建 `_generators`（`GeneratorConfig`），交由 `createMockFactory` 生成 N 条；
  * 3. `ref` / relation 策略引用父实体已生成的 id / 标量字段池；
- * 4. `computed` 字段与 `nullable` 权重在生成完成后进行后处理。
+ * 4. relation 填充 FK 字段 → computed 求值（可引用 FK 字段）→ nullable 权重置空（v1.5.0 顺序修正）。
  */
 
 import type { GeneratorConfig, GeneratorContext, MockFieldSchema } from "./factory.js";
@@ -120,12 +120,12 @@ export function parseMockDataSpec(json: string): MockDataSpec {
     validateEntity(entityName, entityRaw);
   }
 
-  validateScenarios(spec.scenarios);
+  validateScenarios(spec.scenarios, new Set(Object.keys(entities)));
 
   return spec as unknown as MockDataSpec;
 }
 
-function validateScenarios(scenariosRaw: unknown): void {
+function validateScenarios(scenariosRaw: unknown, entityNames: Set<string>): void {
   if (scenariosRaw === undefined) return;
   if (typeof scenariosRaw !== "object" || scenariosRaw === null || Array.isArray(scenariosRaw)) {
     throw new Error("[tsclient-mock] parseMockDataSpec: scenarios 必须是对象。");
@@ -135,6 +135,11 @@ function validateScenarios(scenariosRaw: unknown): void {
       throw new Error(`[tsclient-mock] parseMockDataSpec: 场景 "${scenarioName}" 必须是对象。`);
     }
     for (const [entityName, countRaw] of Object.entries(defRaw as Record<string, unknown>)) {
+      if (!entityNames.has(entityName)) {
+        throw new Error(
+          `[tsclient-mock] parseMockDataSpec: 场景 "${scenarioName}" 引用了未定义的实体 "${entityName}"。`,
+        );
+      }
       const counts = countRaw as { count?: unknown } | null;
       if (counts === null || typeof counts !== "object" || typeof counts.count !== "number" || counts.count < 0) {
         throw new Error(`[tsclient-mock] parseMockDataSpec: 场景 "${scenarioName}" 中实体 "${entityName}" 缺少合法的 count（非负数字）。`);
@@ -205,6 +210,32 @@ export interface GenerateFromSpecOptions {
   faker?: Record<string, unknown>;
   /** 实体名 → MockFieldSchema 记录（交由工厂做类型驱动兜底生成） */
   schemas?: Record<string, Record<string, unknown>>;
+  /** 场景名：覆盖 spec.scenarios[scenario] 中声明的实体 count（v1.5.0 新增） */
+  scenario?: string;
+}
+
+/** 解析场景覆盖：scenario → 实体名 → count；未提及的实体保持默认 count */
+function resolveScenarioCounts(
+  spec: MockDataSpec,
+  scenarioName: string | undefined,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const [name, entity] of Object.entries(spec.entities)) {
+    counts.set(name, entity.count);
+  }
+  if (scenarioName === undefined) return counts;
+  const scenario = spec.scenarios?.[scenarioName];
+  if (scenario === undefined) {
+    const available = Object.keys(spec.scenarios ?? {}).join(", ");
+    throw new Error(
+      `[tsclient-mock] generateFromSpec: 未知场景 "${scenarioName}"。`
+      + (available.length > 0 ? ` 可用场景：${available}。` : " 该 spec 未定义任何场景。"),
+    );
+  }
+  for (const [entityName, def] of Object.entries(scenario)) {
+    counts.set(entityName, def.count); // 已由 parse 校验保证 entityName 存在
+  }
+  return counts;
 }
 
 /** 将 mock 数据规范转换为确定性数据集 */
@@ -214,6 +245,7 @@ export function generateFromSpec(
 ): DatasetSeed {
   const seed = spec.seed ?? 42;
   const order = topologicalSortEntityNames(spec);
+  const entityCounts = resolveScenarioCounts(spec, options?.scenario);
 
   const idPool = new Map<string, (string | number)[]>(); // 实体/字段 → 标量值池（ref / relation 引用）
   const result: DatasetSeed = {};
@@ -221,6 +253,7 @@ export function generateFromSpec(
   for (let index = 0; index < order.length; index++) {
     const entityName = order[index];
     const entity = spec.entities[entityName];
+    const count = entityCounts.get(entityName) ?? entity.count;
 
     const generators = buildGenerators(entityName, entity, options, idPool);
     const strategy = options?.faker !== undefined ? ("realistic" as const) : ("minimal" as const);
@@ -234,11 +267,12 @@ export function generateFromSpec(
     };
     const factory = createMockFactory<Record<string, unknown>>(factoryOptions);
 
-    const items = factory.makeN(entity.count) as Record<string, unknown>[];
+    const items = factory.makeN(count) as Record<string, unknown>[];
 
-    applyPostPass(entityName, entity, items);
-    applyRelations(entityName, entity, items, idPool);
-    collectIds(entityName, items, idPool);
+    applyRelations(entityName, entity, items, idPool);   // ① FK 填充（先）
+    applyComputed(entity, items);                     // ② computed（可引用 FK 字段）
+    applyNullable(entityName, entity, items);            // ③ nullable（最后，computed 结果与 FK 字段均可置空）
+    collectIds(entityName, items, idPool);               // ④ 池收集（含 computed 结果）
 
     result[entityName] = items;
   }
@@ -587,16 +621,21 @@ function isFieldSchemaLike(value: unknown): value is MockFieldSchema {
 
 // ── 后处理：computed / nullable / relation / id 池 ──
 
-function applyPostPass(entityName: string, entity: MockEntitySpec, items: Record<string, unknown>[]): void {
+/** computed：引用同一实体内的其他字段计算（含 relation 填充的 FK 字段） */
+function applyComputed(entity: MockEntitySpec, items: Record<string, unknown>[]): void {
   for (const item of items) {
-    // computed：引用同一实体内的其他字段计算
     for (const [field, rule] of Object.entries(entity.fields)) {
       if (rule.compute !== undefined) {
         const value = evaluateCompute(rule.compute, item);
         if (value !== undefined) item[field] = value;
       }
     }
-    // nullable：按权重（确定性随机）将字段置 null
+  }
+}
+
+/** nullable：按权重（确定性随机）将字段置 null */
+function applyNullable(entityName: string, entity: MockEntitySpec, items: Record<string, unknown>[]): void {
+  for (const item of items) {
     for (const [field, rule] of Object.entries(entity.fields)) {
       const weight = rule.nullable?.weight;
       if (typeof weight === "number") {

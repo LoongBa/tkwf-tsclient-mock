@@ -365,6 +365,243 @@ describe("generateFromSpec", () => {
     const b = generateFromSpec(spec);
     expect(a).toEqual(b);
   });
+
+  // ── 场景化生成（v1.5.0） ─────────────────────────────────
+
+  it("applies scenario count overrides via { scenario }", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 5,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+          logs: {
+            count: 50,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+            relations: [
+              { type: "belongsTo", field: "storeId", targetEntity: "stores", targetField: "id" },
+            ],
+          },
+        },
+        scenarios: {
+          default: { stores: { count: 5 }, logs: { count: 50 } },
+          minimal: { stores: { count: 1 }, logs: { count: 3 } },
+          empty: { stores: { count: 0 }, logs: { count: 0 } },
+        },
+      }),
+    );
+    const data = generateFromSpec(spec, { scenario: "minimal" });
+    expect(data.stores).toHaveLength(1);
+    expect(data.logs).toHaveLength(3);
+  });
+
+  it("keeps default counts for entities not mentioned in the scenario (partial override)", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 5,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+          logs: {
+            count: 50,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+        },
+        scenarios: {
+          fewLogs: { logs: { count: 2 } },
+        },
+      }),
+    );
+    const data = generateFromSpec(spec, { scenario: "fewLogs" });
+    expect(data.logs).toHaveLength(2);
+    expect(data.stores).toHaveLength(5); // 未提及 → 默认 count
+  });
+
+  it("handles empty scenario (count=0) without throwing", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 5,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+          logs: {
+            count: 50,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+            relations: [
+              { type: "belongsTo", field: "storeId", targetEntity: "stores", targetField: "id" },
+            ],
+          },
+        },
+        scenarios: {
+          empty: { stores: { count: 0 }, logs: { count: 0 } },
+        },
+      }),
+    );
+    const data = generateFromSpec(spec, { scenario: "empty" });
+    expect(data.stores).toHaveLength(0);
+    expect(data.logs).toHaveLength(0);
+  });
+
+  it("throws with available scenarios for an unknown scenario", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 2,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+        },
+        scenarios: {
+          default: { stores: { count: 2 } },
+          minimal: { stores: { count: 1 } },
+        },
+      }),
+    );
+    expect(() => generateFromSpec(spec, { scenario: "nope" })).toThrow(/未知场景 "nope"/);
+    expect(() => generateFromSpec(spec, { scenario: "nope" })).toThrow(/可用场景：default, minimal/);
+  });
+
+  it("throws when scenario is requested but spec defines none", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 2,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+        },
+      }),
+    );
+    expect(() => generateFromSpec(spec, { scenario: "default" })).toThrow(/未定义任何场景/);
+  });
+
+  it("rejects a scenario referencing an undefined entity at parse time", () => {
+    expect(() =>
+      parseMockDataSpec(
+        JSON.stringify({
+          version: 1,
+          entities: {
+            stores: {
+              count: 2,
+              fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+            },
+          },
+          scenarios: {
+            bad: { missingEntity: { count: 1 } },
+          },
+        }),
+      ),
+    ).toThrow(/场景 "bad" 引用了未定义的实体 "missingEntity"/);
+  });
+
+  it("is deterministic for the same seed and scenario", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      seed: 7,
+      entities: {
+        stores: {
+          count: 5,
+          fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+        },
+        logs: {
+          count: 50,
+          fields: {
+            id: { kind: "number", strategy: "sequence", start: 1 },
+            amount: { kind: "number", strategy: "range", min: 1, max: 999 },
+          },
+        },
+      },
+      scenarios: {
+        minimal: { stores: { count: 2 }, logs: { count: 4 } },
+      },
+    });
+    const spec = parseMockDataSpec(raw);
+    const a = generateFromSpec(spec, { scenario: "minimal" });
+    const b = generateFromSpec(spec, { scenario: "minimal" });
+    expect(a).toEqual(b);
+  });
+
+  // ── computed 管线顺序（v1.5.0） ─────────────────────────
+
+  it("evaluates computed fields after belongsTo relations fill FK values", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 3,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+          orders: {
+            count: 5,
+            fields: {
+              id: { kind: "number", strategy: "sequence", start: 1 },
+              // constant 占位：若 computed 先于 relation 求值，将看到 -1（修复前行为）
+              storeId: { kind: "number", strategy: "constant", value: -1 },
+              resolvedStoreId: {
+                kind: "number",
+                strategy: "computed",
+                compute: {
+                  op: "coalesce",
+                  operands: [{ field: "storeId" }, { literal: 0 }],
+                },
+              },
+            },
+            relations: [
+              { type: "belongsTo", field: "storeId", targetEntity: "stores", targetField: "id" },
+            ],
+          },
+        },
+      }),
+    );
+    const data = generateFromSpec(spec);
+    const storeIds = data.stores.map((s) => s.id);
+    for (const order of data.orders) {
+      expect(storeIds).toContain(order.storeId); // relation 已填充
+      expect(order.resolvedStoreId).toBe(order.storeId); // computed 读到 relation 值而非 -1
+    }
+  });
+
+  it("applies nullable to relation-filled fields (weight=1.0 nulls all)", () => {
+    const spec = parseMockDataSpec(
+      JSON.stringify({
+        version: 1,
+        entities: {
+          stores: {
+            count: 3,
+            fields: { id: { kind: "number", strategy: "sequence", start: 1 } },
+          },
+          orders: {
+            count: 5,
+            fields: {
+              id: { kind: "number", strategy: "sequence", start: 1 },
+              storeId: {
+                kind: "number",
+                strategy: "constant",
+                value: 0,
+                nullable: { weight: 1.0 },
+              },
+            },
+            relations: [
+              { type: "belongsTo", field: "storeId", targetEntity: "stores", targetField: "id" },
+            ],
+          },
+        },
+      }),
+    );
+    const data = generateFromSpec(spec);
+    for (const order of data.orders) {
+      expect(order.storeId).toBeNull(); // nullable 在 relation 之后执行 → 置空生效
+    }
+  });
 });
 
 // ── serializeDatasetSeed ────────────────────────────────────
