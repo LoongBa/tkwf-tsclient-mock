@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createMockDb, encodeCursor, decodeCursor } from "./mock-db";
 
 interface PaymentLog {
@@ -310,6 +310,53 @@ describe("createMockDb — 状态同步 / reset / 注册", () => {
       merchants: [],
     });
     expect(db.query("logs")).toHaveLength(1);
+  });
+
+  it("buildDataset unknownTables: warn 输出未知表名（v1.4.2）", () => {
+    const db = createMockDb({ logs: [] });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      db.buildDataset({ logs: [], PaymentLog: [{ id: 1 }] }, { unknownTables: "warn" });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = warnSpy.mock.calls[0][0] as string;
+      expect(msg).toContain("PaymentLog");
+      expect(msg).toContain("logs");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("buildDataset unknownTables: error 抛错（v1.4.2）", () => {
+    const db = createMockDb({ logs: [] });
+    expect(() => {
+      db.buildDataset({ logs: [], PaymentLog: [{ id: 1 }] }, { unknownTables: "error" });
+    }).toThrow(/未声明的表/);
+  });
+
+  it("buildDataset unknownTables 默认 ignore 静默（向后兼容，v1.4.2）", () => {
+    const db = createMockDb({ logs: [] });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // 不传 unknownTables → 默认 "ignore"
+      db.buildDataset({ logs: [], PaymentLog: [{ id: 1 }] });
+      expect(warnSpy).not.toHaveBeenCalled();
+      // 数据仍导入（原行为）
+      expect(db.query("logs")).toHaveLength(0);
+      expect(db.query("PaymentLog")).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("buildDataset 空初始化 db 不做未知表检测（v1.4.2）", () => {
+    const db = createMockDb({});  // 无已声明表
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      db.buildDataset({ anything: [{ id: 1 }] }, { unknownTables: "warn" });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

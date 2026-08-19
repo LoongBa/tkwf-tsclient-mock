@@ -94,3 +94,24 @@ gen-mock-handlers --mock-spec <本文件路径>                     # ④ 更新
 - 默认场景 count → `scenarios.default` —— v1.4.1 起 `generateFromSpec(spec, { scenario })` 按场景覆盖 count；运行时场景切换（数据+注入联动）用 `createScenarioContext`
 
 详情见 `MOCK_DATA_SPEC.example.json`。
+
+---
+
+## 六、共享与移植指引（v1.4.2）
+
+> 本文件在不同项目间共享时，注意各节的移植性差异。
+
+| 节 | 可移植性 | 接收方操作 |
+|----|---------|-----------|
+| §1 API 映射表 | ❌ 项目特定 | 删除 `<!-- auto-generated -->` 标记段，用本项目 `ts-client.g.ts` 重跑 `gen-mock-handlers --mock-spec` 重新生成 |
+| §2 数据策略 | ✅ 可移植 | 同 WebApi 可直接复用；不同 WebApi 需按本项目实体调整 |
+| §3 表间关系 | ✅ 可移植 | 同 WebApi 可直接复用；不同 WebApi 需按本项目外键调整 |
+| §4 schema 变更同步 | ✅ 可移植 | 命令通用，路径按本项目调整 |
+| §5 MockDataSpec JSON | ✅ 可移植 | 语言无关的结构化规则，直接复用 |
+
+**接收方导入步骤**：
+1. 复制本文件到接收项目
+2. 删除 §1 映射表 → 重跑 `gen-mock-handlers --mock-spec` 重新生成
+3. 若同时接收 `MockDataSpec JSON` → 直接 `generateFromSpec` 生成数据
+4. 若同时接收 `DatasetSeed JSON` → 直接 `parseDatasetSeed` + `buildDataset` 加载
+5. `buildDataset(seed, { unknownTables: "warn" })` 检测表名不匹配（v1.4.2）

@@ -63,6 +63,71 @@
 2. C# 侧调用 `DacMigrator.JsonToDatabaseAsync()` 写入 PostgreSQL（路径"转换"）
 3. 或 C# 侧直接从 MockDataSpec JSON 用 Bogus 生成（路径"重新生成"）
 
+### Step 5：接收方导入（v1.4.2）
+
+从别的项目接收 mock 文件时，按接收物类型选择路径：
+
+#### Step 5a：接收 DatasetSeed JSON（直接数据——推荐用于测试）
+
+**适用**：对方只做测试，不关心生成逻辑，需要确定性数据。
+
+**接收文件**：
+- `seed.json`（DatasetSeed JSON，由 `serializeDatasetSeed` 或 `exportDatasetSeed` 产出）
+- `MOCK_SPEC.md`（可选，人类可读的数据策略说明）
+
+**导入步骤**：
+
+```typescript
+// Node 环境
+import { importDatasetSeed } from "@tkwf/tsclient-mock/server";
+importDatasetSeed(db, "path/to/seed.json");
+
+// 或浏览器环境（从内嵌 TS 模块加载）
+import { parseDatasetSeed } from "@tkwf/tsclient-mock";
+const seed = parseDatasetSeed(jsonString);
+db.buildDataset(seed, { unknownTables: "warn" });  // v1.4.2：检测表名不匹配
+```
+
+**注意**：
+- `db` 必须由本项目的 `createMockDb({...})` 初始化，表名与 `ts-client.mock.g.ts` 的 handler 查询表名一致
+- `unknownTables: "warn"` 暴露表名不匹配（v1.4.2 新增）——数据被注入到已声明表之外时立即提示
+- MOCK_SPEC.md §1（API 映射表）是项目特定的，不能直接复用——需用本项目 `ts-client.g.ts` 重跑 `gen-mock-handlers --mock-spec`
+
+#### Step 5b：接收 MockDataSpec JSON（规则——需重新生成）
+
+**适用**：对方要调整条数/场景/分布，或做跨语言重新生成。
+
+**接收文件**：
+- `mock-data-spec.json`（MockDataSpec JSON，结构化规则）
+- `MOCK_SPEC.md`（人类可读策略，§2-3 可移植）
+
+**导入步骤**：
+
+```typescript
+import { parseMockDataSpec, generateFromSpec } from "@tkwf/tsclient-mock";
+// Node 文件读取（浏览器用 parseMockDataSpec(jsonString) 替代）：
+import { loadMockDataSpec } from "@tkwf/tsclient-mock/server";
+const spec = loadMockDataSpec("path/to/mock-data-spec.json");
+const seed = generateFromSpec(spec, { faker: fakerZH_CN, scenario: "default" });
+db.buildDataset(seed, { unknownTables: "warn" });
+```
+
+**注意**：
+- 同一 spec + 同一 seed → 确定性数据完全一致（跨项目/跨语言）
+- `generateFromSpec` 使用 `faker` 策略时需要 faker 实例
+- `scenario` 参数可选（v1.4.1 新增），省略时用实体默认 count
+
+#### Step 5c：接收 MOCK_SPEC.md（仅策略文档）
+
+**适用**：对方从零开始，只需数据策略参考。
+
+**操作**：
+1. 复制 MOCK_SPEC.md 到 `<项目>/.TKWF/merchant/MOCK_SPEC.md`（或 `src/mock/MOCK_SPEC.md`）
+2. **删除 §1 映射表**（`<!-- auto-generated -->` 标记段）——本项目 API 不同，需重新生成
+3. 运行 `gen-mock-handlers --mock-spec <路径>` 重新生成 §1
+4. 按 §2 数据策略 + §3 表间关系编写本项目的 `MockDataSpec JSON`
+5. 后续走 Step 2-3（填写规则 → 生成验证）
+
 ## 工具参考
 
 | 工具 | 用法 | 说明 |
@@ -73,6 +138,7 @@
 | `serializeDatasetSeed(seed)` | `serializeDatasetSeed(seed)` | 序列化 DatasetSeed 为 JSON 字符串 |
 | `exportDatasetSeed(db, tables, path)` | `exportDatasetSeed(db, ["paymentLogs"], "seed.json")` | 导出 DatasetSeed 到文件（Node-only） |
 | `importDatasetSeed(db, path)` | `importDatasetSeed(db, "seed.json")` | 从文件导入 DatasetSeed（Node-only） |
+| `buildDataset(seed, { unknownTables })` | `db.buildDataset(seed, { unknownTables: "warn" })` | 批量导入 + 未知表名检测（v1.4.2："warn" \| "error" \| "ignore"） |
 | `createMockFactory<T>()` | `createMockFactory<T>({ _types, _strategy: "realistic" })` | 类型驱动的真实感数据生成（需 faker.js） |
 | `defineXxxFactory.make()` | `defineXxxFactory.make({ key: value })` | 覆盖关键字段，其余自动生成 |
 | `db.registerRelation()` | `db.registerRelation(table, field, { type, targetTable, foreignKey })` | 注册外键关系，启用关联过滤 |
@@ -138,3 +204,10 @@
 ### 包装/分页响应（Connection）不在 MockDataSpec 范围内
 
 `generateFromSpec` 返回平坦的 `DatasetSeed = Record<string, T[]>`，不包含分页/Connection 包装结构（如 `{ items, page, total }`）。这些包装由 `createMockDb.query()` 运行时自动组装。如果消费端需要包装表数据，需在 `data.ts` 中手写或通过 `db.query()` 组装。跨语言交换时，目标语言也需自行组装包装结构。
+
+### 接收的 seed 导入后页面空白，无报错
+
+大概率是 **seed 表名与 db 声明表名不匹配**——数据被注入到无人查询的表。排查：
+1. 对比 seed 键名与 `createMockDb({...})` 的初始化表名（如 `PaymentLog` vs `paymentLogs`）
+2. 用 `db.buildDataset(seed, { unknownTables: "warn" })`（v1.4.2）——console 会列出未声明的表名
+3. 或 `unknownTables: "error"` 让不匹配直接抛错（CI 场景）

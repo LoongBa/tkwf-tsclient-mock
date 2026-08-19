@@ -108,8 +108,10 @@ export interface MockDb {
   insert<T>(table: string, row: T): T;
   update<T>(table: string, id: string | number, patch: Partial<T>): T | undefined;
   remove(table: string, id: string | number): boolean;
-  /** 批量种子数据导入 */
-  buildDataset(dataset: DatasetSeed, options?: { strict?: boolean }): void;
+  /** 批量种子数据导入
+   * @param options.unknownTables v1.4.2：seed 表名与已声明表不匹配时的处理（"warn" | "error" | "ignore"，默认 "ignore"）
+   */
+  buildDataset(dataset: DatasetSeed, options?: { strict?: boolean; unknownTables?: "warn" | "error" | "ignore" }): void;
   /** 重置数据：无参时重置当前数据集到初始快照；传 name 时切换到该数据集并重置 */
   reset(name?: string): void;
   /** 切换当前数据集到指定名称，不存在则抛出错误 */
@@ -793,7 +795,22 @@ export function createMockDb(
       return rows.delete(id);
     },
 
-    buildDataset(dataset: DatasetSeed, options?: { strict?: boolean }): void {
+    buildDataset(dataset: DatasetSeed, options?: { strict?: boolean; unknownTables?: "warn" | "error" | "ignore" }): void {
+      // 未知表检测（v1.4.2）：seed 表名与已声明表不匹配时按模式处理。
+      // 仅当已声明至少一张表时检测——`createMockDb({})` 空初始化无法区分"故意空"与"表名不匹配"。
+      const mode = options?.unknownTables ?? "ignore";
+      const declaredTables = new Set(tables.keys());
+      if (mode !== "ignore" && declaredTables.size > 0) {
+        const unknown = Object.keys(dataset).filter((t) => !declaredTables.has(t));
+        if (unknown.length > 0) {
+          const msg =
+            `[tsclient-mock] buildDataset: seed 包含未声明的表 [${unknown.join(", ")}]，` +
+            `已声明的表为 [${[...declaredTables].join(", ")}]。表名不匹配会导致数据注入到无人查询的表，页面空白。`;
+          if (mode === "error") throw new Error(msg);
+          console.warn(msg);
+        }
+      }
+
       for (const [table, rows] of Object.entries(dataset)) {
         const tableMap = tables.get(table) ?? new Map();
         for (const row of rows) {
