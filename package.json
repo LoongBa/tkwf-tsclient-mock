@@ -1,6 +1,6 @@
 {
   "name": "@tkwf/tsclient-mock",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": "LoongBa",
   "license": "MIT",
   "description": "Type-driven mock runtime for @tkwf/tsclient — MockTransport, type-driven factory, in-memory query engine",

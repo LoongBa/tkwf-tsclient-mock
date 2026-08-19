@@ -366,7 +366,7 @@ describe("generateFromSpec", () => {
     expect(a).toEqual(b);
   });
 
-  // ── 场景化生成（v1.5.0） ─────────────────────────────────
+  // ── 场景化生成（v1.4.1） ─────────────────────────────────
 
   it("applies scenario count overrides via { scenario }", () => {
     const spec = parseMockDataSpec(
@@ -529,7 +529,7 @@ describe("generateFromSpec", () => {
     expect(a).toEqual(b);
   });
 
-  // ── computed 管线顺序（v1.5.0） ─────────────────────────
+  // ── computed 管线顺序（v1.4.1） ─────────────────────────
 
   it("evaluates computed fields after belongsTo relations fill FK values", () => {
     const spec = parseMockDataSpec(

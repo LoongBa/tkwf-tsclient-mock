@@ -8,7 +8,7 @@
  * 1. 按 relation（belongsTo）对实体做拓扑排序（Kahn 算法），确保父实体先于子实体生成；
  * 2. 每个实体按字段规则构建 `_generators`（`GeneratorConfig`），交由 `createMockFactory` 生成 N 条；
  * 3. `ref` / relation 策略引用父实体已生成的 id / 标量字段池；
- * 4. relation 填充 FK 字段 → computed 求值（可引用 FK 字段）→ nullable 权重置空（v1.5.0 顺序修正）。
+ * 4. relation 填充 FK 字段 → computed 求值（可引用 FK 字段）→ nullable 权重置空（v1.4.1 顺序修正）。
  */
 
 import type { GeneratorConfig, GeneratorContext, MockFieldSchema } from "./factory.js";
@@ -210,7 +210,7 @@ export interface GenerateFromSpecOptions {
   faker?: Record<string, unknown>;
   /** 实体名 → MockFieldSchema 记录（交由工厂做类型驱动兜底生成） */
   schemas?: Record<string, Record<string, unknown>>;
-  /** 场景名：覆盖 spec.scenarios[scenario] 中声明的实体 count（v1.5.0 新增） */
+  /** 场景名：覆盖 spec.scenarios[scenario] 中声明的实体 count（v1.4.1 新增） */
   scenario?: string;
 }
 

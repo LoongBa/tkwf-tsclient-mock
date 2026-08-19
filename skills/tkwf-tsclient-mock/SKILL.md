@@ -1,4 +1,4 @@
-# tkwf-tsclient-mock Skill
+﻿# tkwf-tsclient-mock Skill
 
 > **维护位置**：`_TKWF/docs/AC-Kit/skills/tkwf-tsclient-mock/` — 修改 skill 时应同步更新 AC-Kit 副本。
 > 本副本随 npm 包发布（`package.json` 的 `files` 字段包含 `skills` 目录）。
@@ -46,7 +46,7 @@
    - 修正字段 `strategy`（faker / range / dateRange / weighted / ...）
    - 填 `distribution` / `weights`（分布）
    - 填 `relations`（FK 引用）
-   - 填 `scenarios`（default / empty / minimal）——v1.5.0 起 `generateFromSpec(spec, { scenario })` 会按场景覆盖实体 count；运行时场景切换（数据+注入联动）仍用 `createScenarioContext`
+   - 填 `scenarios`（default / empty / minimal）——v1.4.1 起 `generateFromSpec(spec, { scenario })` 会按场景覆盖实体 count；运行时场景切换（数据+注入联动）仍用 `createScenarioContext`
    - 校验：`mock-data-spec.schema.json` 描述了 JSON Schema 约束
 
 ### Step 3：生成与验证
