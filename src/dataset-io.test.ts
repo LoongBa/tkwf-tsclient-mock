@@ -1,9 +1,11 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMockDb } from "./mock-db.js";
 import { exportDatasetSeed, importDatasetSeed, loadMockDataSpec } from "./dataset-io.js";
+import { generateSeedFile } from "./codegen/gen-seed-core.js";
+import { parseDatasetSeed } from "./mock-data-spec.js";
 
 let tmpDir: string;
 
@@ -107,5 +109,89 @@ describe("importDatasetSeed", () => {
 
     const db = createMockDb({ customers: [] });
     expect(() => importDatasetSeed(db, filePath)).toThrow(/not an array/);
+  });
+
+  it("unknownTables: warn 透传——未知表输出 console.warn（v1.4.3）", () => {
+    const filePath = join(tmpDir, "seed-warn.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({ customers: [{ id: 1 }], UnknownTable: [{ id: 2 }] }),
+      "utf-8",
+    );
+
+    const db = createMockDb({ customers: [] });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      importDatasetSeed(db, filePath, { unknownTables: "warn" });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect((warnSpy.mock.calls[0][0] as string)).toContain("UnknownTable");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("无 options 时默认 ignore——向后兼容（v1.4.3）", () => {
+    const filePath = join(tmpDir, "seed-default.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({ customers: [{ id: 1 }], UnknownTable: [{ id: 2 }] }),
+      "utf-8",
+    );
+
+    const db = createMockDb({ customers: [] });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      importDatasetSeed(db, filePath);
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(db.query("customers")).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+describe("generateSeedFile（gen-seed 核心，v1.4.3）", () => {
+  const minimalSpec = JSON.stringify({
+    version: 1,
+    locale: "zh-CN",
+    seed: 42,
+    entities: {
+      PaymentLog: {
+        count: 3,
+        fields: {
+          id: { kind: "number", strategy: "sequence", start: 1 },
+          amount: { kind: "number", strategy: "range", min: 100, max: 999 },
+          status: { kind: "string", strategy: "enum", values: ["OK", "FAIL"] },
+        },
+      },
+    },
+    scenarios: {
+      default: { PaymentLog: { count: 3 } },
+      empty: { PaymentLog: { count: 0 } },
+    },
+  });
+
+  it("从 mock-data-spec.json 生成合法 seed.json", async () => {
+    const specPath = join(tmpDir, "spec.json");
+    const outputPath = join(tmpDir, "seed.json");
+    writeFileSync(specPath, minimalSpec, "utf-8");
+
+    const result = await generateSeedFile(specPath, { output: outputPath });
+    expect(result.tableCount).toBe(1);
+    expect(existsSync(outputPath)).toBe(true);
+
+    const seed = parseDatasetSeed(readFileSync(outputPath, "utf-8"));
+    expect(seed).toHaveProperty("PaymentLog");
+    expect(seed.PaymentLog).toHaveLength(3);
+  });
+
+  it("scenario 参数覆盖 count（empty → 0 条）", async () => {
+    const specPath = join(tmpDir, "spec-sc.json");
+    const outputPath = join(tmpDir, "seed-sc.json");
+    writeFileSync(specPath, minimalSpec, "utf-8");
+
+    await generateSeedFile(specPath, { output: outputPath, scenario: "empty" });
+    const seed = parseDatasetSeed(readFileSync(outputPath, "utf-8"));
+    expect(seed.PaymentLog).toHaveLength(0);
   });
 });

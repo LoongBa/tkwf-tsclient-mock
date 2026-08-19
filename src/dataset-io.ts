@@ -26,11 +26,16 @@ export function exportDatasetSeed(
 /**
  * Import a DatasetSeed from a JSON file into a MockDb.
  * Node-only — uses fs.
+ * @param options.unknownTables v1.4.3：透传给 buildDataset，检测表名不匹配（"warn" | "error" | "ignore"）
  */
-export function importDatasetSeed(db: MockDb, filePath: string): void {
+export function importDatasetSeed(
+  db: MockDb,
+  filePath: string,
+  options?: { unknownTables?: "warn" | "error" | "ignore" },
+): void {
   const content = fs.readFileSync(filePath, "utf-8");
   const seed = parseDatasetSeed(content);
-  db.buildDataset(seed);
+  db.buildDataset(seed, { unknownTables: options?.unknownTables });
 }
 
 /**

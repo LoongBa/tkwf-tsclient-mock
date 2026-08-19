@@ -63,6 +63,18 @@
 2. C# 侧调用 `DacMigrator.JsonToDatabaseAsync()` 写入 PostgreSQL（路径"转换"）
 3. 或 C# 侧直接从 MockDataSpec JSON 用 Bogus 生成（路径"重新生成"）
 
+### Step 4b（可选）：导出 seed.json（给其他项目做模式 A 交接）
+
+填写完 `mock-data-spec.json` 并验证通过后，运行：
+
+```bash
+npx gen-seed --spec .tkwf/mock-data-spec.json --output handoff/seed.json
+# --scenario minimal  可选：指定生成期场景覆盖 count
+# --faker             可选：启用 faker 策略（需安装 @faker-js/faker）
+```
+
+生成的 `seed.json` 可直接给其他项目导入（见 Step 5a）。
+
 ### Step 5：接收方导入（v1.4.2）
 
 从别的项目接收 mock 文件时，按接收物类型选择路径：
@@ -139,6 +151,9 @@ db.buildDataset(seed, { unknownTables: "warn" });
 | `exportDatasetSeed(db, tables, path)` | `exportDatasetSeed(db, ["paymentLogs"], "seed.json")` | 导出 DatasetSeed 到文件（Node-only） |
 | `importDatasetSeed(db, path)` | `importDatasetSeed(db, "seed.json")` | 从文件导入 DatasetSeed（Node-only） |
 | `buildDataset(seed, { unknownTables })` | `db.buildDataset(seed, { unknownTables: "warn" })` | 批量导入 + 未知表名检测（v1.4.2："warn" \| "error" \| "ignore"） |
+| `importDatasetSeed(db, path, options?)` | `importDatasetSeed(db, "seed.json", { unknownTables: "error" })` | 从文件导入 DatasetSeed（Node-only，v1.4.3 透传 unknownTables） |
+| `gen-seed` CLI | `npx gen-seed --spec mock-data-spec.json --output seed.json` | 从 MockDataSpec JSON 生成 DatasetSeed JSON（v1.4.3） |
+| `defaultSessionHandlers` | `new MockTransport({ ...defaultSessionHandlers, ...handlers })` | 内置会话 handler（登录/注册/心跳/登出，v1.4.3 补齐 loginBySms/ping/registerSecure/loginByQrCode） |
 | `createMockFactory<T>()` | `createMockFactory<T>({ _types, _strategy: "realistic" })` | 类型驱动的真实感数据生成（需 faker.js） |
 | `defineXxxFactory.make()` | `defineXxxFactory.make({ key: value })` | 覆盖关键字段，其余自动生成 |
 | `db.registerRelation()` | `db.registerRelation(table, field, { type, targetTable, foreignKey })` | 注册外键关系，启用关联过滤 |
