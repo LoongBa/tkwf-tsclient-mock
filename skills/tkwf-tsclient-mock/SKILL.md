@@ -1,5 +1,8 @@
 # tkwf-tsclient-mock Skill
 
+> **维护位置**：`_TKWF/docs/AC-Kit/skills/tkwf-tsclient-mock/` — 修改 skill 时应同步更新 AC-Kit 副本。
+> 本副本随 npm 包发布（`package.json` 的 `files` 字段包含 `skills` 目录）。
+>
 > 为消费项目生成和填充 mock 数据，使前端在无后端时也能运行。
 > 输入：`ts-client.g.ts` + `ts-client.mock.g.ts` 骨架 + 领域文档；输出：`MockDataSpec JSON` + 自动生成的数据。
 > 依赖 `@tkwf/tsclient-mock`（gen-mock-handlers / createMockFactory / MockTransport / generateFromSpec）。
